@@ -2,21 +2,11 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
-const DAYS = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrydag', 'Saterdag', 'Sondag']
-const DAY_COLORS = [
-  'from-blue-400 to-blue-500',
-  'from-purple-400 to-purple-500',
-  'from-pink-400 to-pink-500',
-  'from-orange-400 to-orange-500',
-  'from-yellow-400 to-amber-500',
-  'from-teal-400 to-teal-500',
-  'from-red-400 to-red-500',
-]
-
 export default function WeeklyPlan() {
   const navigate = useNavigate()
   const [meals, setMeals] = useState([])
-  const [selectedMeals, setSelectedMeals] = useState(Array(7).fill(''))
+  const [selectedMealIds, setSelectedMealIds] = useState(new Set())
+  const [mealCount, setMealCount] = useState(7)
   const [weekLabel, setWeekLabel] = useState('')
   const [activePlan, setActivePlan] = useState(null)
   const [saving, setSaving] = useState(false)
@@ -40,23 +30,41 @@ export default function WeeklyPlan() {
         setActivePlan(planData)
         setWeekLabel(planData.week_label ?? '')
         setShareUrl(`${window.location.origin}/share/${planData.share_token}`)
-        const slots = Array(7).fill('')
-        planData.plan_meals?.forEach(pm => { slots[pm.day_index] = pm.meal_id ?? '' })
-        setSelectedMeals(slots)
+        const ids = new Set(
+          planData.plan_meals?.filter(pm => pm.meal_id).map(pm => pm.meal_id) ?? []
+        )
+        setSelectedMealIds(ids)
       }
     }
     load()
   }, [])
 
+  function toggleMeal(id) {
+    setSelectedMealIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function randomize() {
+    const count = Math.min(Math.max(1, mealCount), meals.length)
+    const shuffled = [...meals].sort(() => Math.random() - 0.5)
+    setSelectedMealIds(new Set(shuffled.slice(0, count).map(m => m.id)))
+  }
+
   async function savePlan() {
     setSaving(true)
     try {
+      const mealIdsArray = [...selectedMealIds]
       if (activePlan) {
         await supabase.from('weekly_plans').update({ week_label: weekLabel, is_active: true }).eq('id', activePlan.id)
         await supabase.from('plan_meals').delete().eq('plan_id', activePlan.id)
-        const rows = selectedMeals
-          .map((mid, i) => ({ plan_id: activePlan.id, day_index: i, meal_id: mid || null }))
-        await supabase.from('plan_meals').insert(rows)
+        if (mealIdsArray.length > 0) {
+          const rows = mealIdsArray.map((mid, i) => ({ plan_id: activePlan.id, day_index: i, meal_id: mid }))
+          await supabase.from('plan_meals').insert(rows)
+        }
         setShareUrl(`${window.location.origin}/share/${activePlan.share_token}`)
       } else {
         const { data: plan, error } = await supabase
@@ -65,9 +73,10 @@ export default function WeeklyPlan() {
           .select('*')
           .single()
         if (error) throw error
-        const rows = selectedMeals
-          .map((mid, i) => ({ plan_id: plan.id, day_index: i, meal_id: mid || null }))
-        await supabase.from('plan_meals').insert(rows)
+        if (mealIdsArray.length > 0) {
+          const rows = mealIdsArray.map((mid, i) => ({ plan_id: plan.id, day_index: i, meal_id: mid }))
+          await supabase.from('plan_meals').insert(rows)
+        }
         setActivePlan(plan)
         setShareUrl(`${window.location.origin}/share/${plan.share_token}`)
       }
@@ -105,30 +114,67 @@ export default function WeeklyPlan() {
         />
       </div>
 
-      <div className="space-y-3 mb-6">
-        {DAYS.map((day, i) => (
-          <div key={day} className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden">
-            <div className={`bg-gradient-to-r ${DAY_COLORS[i]} px-4 py-2`}>
-              <span className="text-white font-black text-sm uppercase tracking-wide">{day}</span>
-            </div>
-            <div className="p-3">
-              <select
-                value={selectedMeals[i]}
-                onChange={e => {
-                  const updated = [...selectedMeals]
-                  updated[i] = e.target.value
-                  setSelectedMeals(updated)
-                }}
-                className="w-full border-2 border-gray-100 rounded-xl px-3 py-2.5 font-bold text-sm focus:outline-none focus:border-green-400 bg-white transition-colors"
-              >
-                <option value="">— Geen maaltyd gekies —</option>
-                {meals.map(m => (
-                  <option key={m.id} value={m.id}>{m.name}</option>
-                ))}
-              </select>
-            </div>
+      <div className="bg-purple-50 border-2 border-purple-200 rounded-2xl p-4 mb-5">
+        <p className="font-extrabold text-purple-800 mb-3">🎲 Willekeurige Keuse</p>
+        <div className="flex items-end gap-3">
+          <div className="flex-1">
+            <label className="block text-xs font-extrabold text-purple-600 mb-1 uppercase tracking-wide">Aantal maaltye</label>
+            <input
+              type="number"
+              min={1}
+              max={meals.length || 99}
+              value={mealCount}
+              onChange={e => setMealCount(Number(e.target.value))}
+              className="w-full border-2 border-purple-200 rounded-xl px-3 py-2.5 font-bold text-sm focus:outline-none focus:border-purple-400 bg-white"
+            />
           </div>
-        ))}
+          <button
+            onClick={randomize}
+            disabled={meals.length === 0}
+            className="shrink-0 bg-purple-500 text-white px-4 py-2.5 rounded-xl font-extrabold text-sm active:scale-95 transition-transform disabled:opacity-50"
+          >
+            🎲 Kies Vir My
+          </button>
+        </div>
+      </div>
+
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-sm font-extrabold text-gray-600 uppercase tracking-wide">
+          Maaltye ({selectedMealIds.size} gekies)
+        </p>
+        {selectedMealIds.size > 0 && (
+          <button
+            onClick={() => setSelectedMealIds(new Set())}
+            className="text-xs text-gray-400 font-bold"
+          >
+            Maak alles skoon
+          </button>
+        )}
+      </div>
+
+      <div className="space-y-2 mb-6">
+        {meals.map(meal => {
+          const isSelected = selectedMealIds.has(meal.id)
+          return (
+            <button
+              key={meal.id}
+              type="button"
+              onClick={() => toggleMeal(meal.id)}
+              className={`w-full text-left flex items-center gap-3 px-4 py-3 rounded-2xl border-2 transition-all active:scale-98 ${
+                isSelected
+                  ? 'border-green-400 bg-green-50 shadow-sm'
+                  : 'border-gray-200 bg-white'
+              }`}
+            >
+              <span className={`w-6 h-6 rounded-lg border-2 flex-shrink-0 flex items-center justify-center text-white text-sm font-black transition-all ${
+                isSelected ? 'bg-green-500 border-green-500' : 'border-gray-300'
+              }`}>
+                {isSelected && '✓'}
+              </span>
+              <span className="font-extrabold text-sm">{meal.name}</span>
+            </button>
+          )
+        })}
       </div>
 
       <button

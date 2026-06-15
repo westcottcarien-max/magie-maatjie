@@ -2,8 +2,6 @@ import { useState, useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
-const DAYS = ['Maandag', 'Dinsdag', 'Woensdag', 'Donderdag', 'Vrydag', 'Saterdag', 'Sondag']
-
 export default function FamilyShare() {
   const { shareToken } = useParams()
   const [plan, setPlan] = useState(null)
@@ -131,7 +129,7 @@ export default function FamilyShare() {
                     {isSelected && '✓'}
                   </span>
                   <div>
-                    <p className="font-extrabold">{DAYS[pm.day_index]}: {meal.name}</p>
+                    <p className="font-extrabold">{meal.name}</p>
                     {meal.ingredients?.length > 0 && (
                       <p className="text-xs text-gray-400 font-semibold mt-1">
                         🥬 {meal.ingredients.map(ing => ing.item_name).join(' · ')}
