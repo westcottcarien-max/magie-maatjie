@@ -3,6 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import IngredientRow from '../components/IngredientRow'
 
+
 const emptyIngredient = () => ({ item_name: '' })
 
 export default function AddMeal() {
@@ -19,10 +20,14 @@ export default function AddMeal() {
   useEffect(() => {
     if (!isEdit) return
     async function load() {
-      const { data: meal } = await supabase.from('meals').select('*').eq('id', id).single()
-      const { data: ings } = await supabase.from('ingredients').select('*').eq('meal_id', id).order('sort_order')
-      if (meal) { setName(meal.name); setNotes(meal.notes ?? '') }
-      if (ings?.length) setIngredients(ings)
+      try {
+        const { data: meal } = await supabase.from('meals').select('*').eq('id', id).maybeSingle()
+        const { data: ings } = await supabase.from('ingredients').select('*').eq('meal_id', id).order('sort_order')
+        if (meal) { setName(meal.name); setNotes(meal.notes ?? '') }
+        if (ings?.length) setIngredients(ings)
+      } catch (err) {
+        setError('Kon maaltyd nie laai nie.')
+      }
     }
     load()
   }, [id, isEdit])
@@ -76,11 +81,39 @@ export default function AddMeal() {
     }
   }
 
+  async function handleDelete() {
+    if (!confirm('Verwyder hierdie maaltyd permanent?')) return
+    setSaving(true)
+    await supabase.from('meals').delete().eq('id', id)
+    navigate('/meals')
+  }
+
   return (
     <div className="max-w-lg mx-auto px-4 py-6">
-      <div className="flex items-center gap-2 mb-6">
-        <span className="text-3xl">{isEdit ? '✏️' : '🍳'}</span>
-        <h2 className="text-2xl font-black">{isEdit ? 'Wysig Maaltyd' : 'Nuwe Maaltyd'}</h2>
+      <div className="flex items-center justify-between mb-6">
+        <div className="flex items-center gap-2">
+          <span className="text-3xl">{isEdit ? '✏️' : '🍳'}</span>
+          <h2 className="text-2xl font-black">{isEdit ? 'Wysig Maaltyd' : 'Nuwe Maaltyd'}</h2>
+        </div>
+        <div className="flex gap-2">
+          {isEdit && (
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={saving}
+              className="bg-red-50 text-red-500 font-extrabold text-sm px-3 py-2 rounded-xl disabled:opacity-40"
+            >
+              🗑️ Skrap
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => navigate('/meals')}
+            className="bg-gray-100 text-gray-500 font-extrabold text-sm px-3 py-2 rounded-xl"
+          >
+            ← Terug
+          </button>
+        </div>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-5">

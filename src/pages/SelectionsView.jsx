@@ -14,7 +14,7 @@ export default function SelectionsView() {
         .eq('is_active', true)
         .order('created_at', { ascending: false })
         .limit(1)
-        .single()
+        .maybeSingle()
 
       if (!planData) { setLoading(false); return }
 

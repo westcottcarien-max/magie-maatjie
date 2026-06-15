@@ -34,7 +34,7 @@ export default function ShoppingList() {
         .eq('is_active', true)
         .order('created_at', { ascending: false })
         .limit(1)
-        .single()
+        .maybeSingle()
 
       if (!planData) { setLoading(false); return }
       setPlanLabel(planData.week_label ?? '')
