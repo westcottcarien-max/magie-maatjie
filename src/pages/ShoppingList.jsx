@@ -1,7 +1,6 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { supabase } from '../lib/supabase'
 
-const KOS_CHECKED_KEY = 'shopping-kos-checked'
 const EXPIRE_MS = 24 * 60 * 60 * 1000
 
 const TABS = [
@@ -28,75 +27,225 @@ function aggregateIngredients(planMeals) {
       const key = ing.item_name.toLowerCase().trim()
       if (!seen.has(key)) {
         seen.add(key)
-        items.push({ item_name: ing.item_name })
+        items.push(ing.item_name)
       }
     })
   })
-  return items.sort((a, b) => a.item_name.localeCompare(b.item_name))
+  return items.sort((a, b) => a.localeCompare(b))
 }
 
-function ManualList({ categoryId }) {
-  const itemsKey = `shopping-${categoryId}-items`
-  const checkedKey = `shopping-${categoryId}-checked`
+// KOS GOETE: ingredient list from the active plan, checked state in Supabase
+function KosTab({ planLabel }) {
+  const [ingredients, setIngredients] = useState([])
+  const [dbItems, setDbItems] = useState([]) // shopping_items rows for category='kos'
+  const [loading, setLoading] = useState(true)
 
-  const [items, setItems] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(itemsKey) ?? '[]') } catch { return [] }
-  })
-  const [checked, setChecked] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(checkedKey) ?? '{}') } catch { return {} }
-  })
-  const [newItem, setNewItem] = useState('')
-
-  // On mount: remove items that were ticked more than 24 hours ago
   useEffect(() => {
-    const expiredKeys = new Set(
-      Object.entries(checked)
-        .filter(([, ts]) => typeof ts === 'number' && !isFresh(ts))
-        .map(([k]) => k)
-    )
-    if (expiredKeys.size === 0) return
+    async function load() {
+      // Load plan ingredients
+      const { data: planData } = await supabase
+        .from('weekly_plans')
+        .select('id')
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
 
-    setItems(prev => {
-      const next = prev.filter(i => !expiredKeys.has(i.toLowerCase()))
-      localStorage.setItem(itemsKey, JSON.stringify(next))
-      return next
-    })
-    setChecked(prev => {
-      const next = Object.fromEntries(Object.entries(prev).filter(([k]) => !expiredKeys.has(k)))
-      localStorage.setItem(checkedKey, JSON.stringify(next))
-      return next
-    })
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+      if (planData) {
+        const { data: pmData } = await supabase
+          .from('plan_meals')
+          .select('meal_id, meals(name, ingredients(item_name))')
+          .eq('plan_id', planData.id)
+          .not('meal_id', 'is', null)
+        setIngredients(aggregateIngredients(pmData ?? []))
+      }
 
-  function addItem() {
+      // Load checked state from DB, delete expired
+      const expiryCutoff = Date.now() - EXPIRE_MS
+      await supabase
+        .from('shopping_items')
+        .delete()
+        .eq('category', 'kos')
+        .not('checked_at', 'is', null)
+        .lt('checked_at', expiryCutoff)
+
+      const { data: rows } = await supabase
+        .from('shopping_items')
+        .select('*')
+        .eq('category', 'kos')
+      setDbItems(rows ?? [])
+      setLoading(false)
+    }
+    load()
+
+    // Realtime subscription
+    const channel = supabase
+      .channel('kos-items')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_items', filter: 'category=eq.kos' }, () => {
+        supabase.from('shopping_items').select('*').eq('category', 'kos').then(({ data }) => setDbItems(data ?? []))
+      })
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
+  }, [])
+
+  async function toggleItem(itemName) {
+    const key = itemName.toLowerCase()
+    const existing = dbItems.find(r => r.item_name.toLowerCase() === key)
+    const currentlyChecked = existing && isFresh(existing.checked_at)
+
+    if (currentlyChecked) {
+      // Untick
+      await supabase
+        .from('shopping_items')
+        .update({ checked_at: null })
+        .eq('id', existing.id)
+    } else if (existing) {
+      // Re-tick
+      await supabase
+        .from('shopping_items')
+        .update({ checked_at: Date.now() })
+        .eq('id', existing.id)
+    } else {
+      // First tick — insert row
+      await supabase
+        .from('shopping_items')
+        .insert({ category: 'kos', item_name: itemName, checked_at: Date.now() })
+    }
+  }
+
+  async function clearChecked() {
+    await supabase
+      .from('shopping_items')
+      .delete()
+      .eq('category', 'kos')
+      .not('checked_at', 'is', null)
+  }
+
+  if (loading) return <p className="text-center py-12 text-gray-400 font-bold animate-pulse">Laai bestanddele…</p>
+
+  if (ingredients.length === 0) return (
+    <div className="text-center py-20">
+      <p className="text-6xl mb-4">🛒</p>
+      <p className="font-black text-lg text-gray-700">Nog geen bestanddele nie!</p>
+      <p className="text-sm text-gray-400 font-semibold mt-1">
+        Stoor eers 'n week se etes plan om jou inkopielys te genereer.
+      </p>
+    </div>
+  )
+
+  const checkedMap = Object.fromEntries(dbItems.map(r => [r.item_name.toLowerCase(), r]))
+  const unchecked = ingredients.filter(n => !isFresh(checkedMap[n.toLowerCase()]?.checked_at))
+  const done = ingredients.filter(n => isFresh(checkedMap[n.toLowerCase()]?.checked_at))
+
+  return (
+    <>
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-sm font-extrabold text-gray-600 uppercase tracking-wide">Bestanddele</p>
+        {done.length > 0 && (
+          <button onClick={clearChecked} className="text-xs bg-red-50 text-red-400 font-extrabold px-3 py-1.5 rounded-xl">
+            🔄 Vee merke uit
+          </button>
+        )}
+      </div>
+      {unchecked.length > 0 && (
+        <p className="text-xs text-gray-400 font-bold mb-3">{unchecked.length} item{unchecked.length !== 1 ? 's' : ''} oor</p>
+      )}
+      <ul className="space-y-2 mb-6">
+        {unchecked.map(name => (
+          <li key={name} onClick={() => toggleItem(name)}
+            className="flex items-center gap-3 bg-white rounded-2xl shadow-md border border-gray-100 px-4 py-3.5 cursor-pointer select-none active:scale-98 transition-transform">
+            <span className="w-6 h-6 rounded-lg border-2 border-gray-300 flex-shrink-0" />
+            <span className="flex-1 font-extrabold">{name}</span>
+            <span className="text-gray-300">›</span>
+          </li>
+        ))}
+      </ul>
+      {done.length > 0 && (
+        <>
+          <p className="text-xs font-extrabold text-gray-400 uppercase tracking-widest mb-3">✅ In mandjie / het reeds</p>
+          <ul className="space-y-2">
+            {done.map(name => (
+              <li key={name} onClick={() => toggleItem(name)}
+                className="flex items-center gap-3 bg-gray-50 rounded-2xl border border-gray-100 px-4 py-3.5 cursor-pointer select-none opacity-50">
+                <span className="w-6 h-6 rounded-lg border-2 border-green-500 bg-green-500 flex-shrink-0 flex items-center justify-center text-white text-sm font-black">✓</span>
+                <span className="flex-1 line-through text-gray-400 font-bold">{name}</span>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+    </>
+  )
+}
+
+// Manual lists: items stored fully in Supabase with realtime sync
+function ManualList({ categoryId }) {
+  const [rows, setRows] = useState([])
+  const [newItem, setNewItem] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    async function load() {
+      // Delete expired checked items on mount
+      const expiryCutoff = Date.now() - EXPIRE_MS
+      await supabase
+        .from('shopping_items')
+        .delete()
+        .eq('category', categoryId)
+        .not('checked_at', 'is', null)
+        .lt('checked_at', expiryCutoff)
+
+      const { data } = await supabase
+        .from('shopping_items')
+        .select('*')
+        .eq('category', categoryId)
+        .order('created_at', { ascending: true })
+      setRows(data ?? [])
+      setLoading(false)
+    }
+    load()
+
+    const channel = supabase
+      .channel(`manual-${categoryId}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_items', filter: `category=eq.${categoryId}` }, () => {
+        supabase
+          .from('shopping_items')
+          .select('*')
+          .eq('category', categoryId)
+          .order('created_at', { ascending: true })
+          .then(({ data }) => setRows(data ?? []))
+      })
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
+  }, [categoryId])
+
+  async function addItem() {
     const trimmed = newItem.trim()
     if (!trimmed) return
-    const updated = [...items, trimmed]
-    setItems(updated)
-    localStorage.setItem(itemsKey, JSON.stringify(updated))
     setNewItem('')
+    await supabase
+      .from('shopping_items')
+      .upsert({ category: categoryId, item_name: trimmed, checked_at: null }, { onConflict: 'category,item_name' })
   }
 
-  function removeItem(item) {
-    const updated = items.filter(i => i !== item)
-    setItems(updated)
-    localStorage.setItem(itemsKey, JSON.stringify(updated))
-    const next = { ...checked }
-    delete next[item.toLowerCase()]
-    setChecked(next)
-    localStorage.setItem(checkedKey, JSON.stringify(next))
+  async function removeItem(id) {
+    await supabase.from('shopping_items').delete().eq('id', id)
   }
 
-  function toggleItem(item) {
-    const key = item.toLowerCase()
-    const currentlyChecked = isFresh(checked[key])
-    const next = { ...checked, [key]: currentlyChecked ? false : Date.now() }
-    setChecked(next)
-    localStorage.setItem(checkedKey, JSON.stringify(next))
+  async function toggleItem(row) {
+    const currentlyChecked = isFresh(row.checked_at)
+    await supabase
+      .from('shopping_items')
+      .update({ checked_at: currentlyChecked ? null : Date.now() })
+      .eq('id', row.id)
   }
 
-  const unchecked = items.filter(i => !isFresh(checked[i.toLowerCase()]))
-  const done = items.filter(i => isFresh(checked[i.toLowerCase()]))
+  if (loading) return <p className="text-center py-12 text-gray-400 font-bold animate-pulse">Laai lys…</p>
+
+  const unchecked = rows.filter(r => !isFresh(r.checked_at))
+  const done = rows.filter(r => isFresh(r.checked_at))
 
   return (
     <div>
@@ -118,7 +267,7 @@ function ManualList({ categoryId }) {
         </button>
       </div>
 
-      {items.length === 0 ? (
+      {rows.length === 0 ? (
         <div className="text-center py-12 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">
           <p className="text-4xl mb-3">📝</p>
           <p className="font-black text-gray-700">Nog geen items nie</p>
@@ -127,56 +276,23 @@ function ManualList({ categoryId }) {
       ) : (
         <>
           <ul className="space-y-2 mb-4">
-            {unchecked.map(item => (
-              <li
-                key={item}
-                className="flex items-center gap-3 bg-white rounded-2xl shadow-md border border-gray-100 px-4 py-3.5"
-              >
-                <span
-                  onClick={() => toggleItem(item)}
-                  className="w-6 h-6 rounded-lg border-2 border-gray-300 flex-shrink-0 cursor-pointer"
-                />
-                <span
-                  onClick={() => toggleItem(item)}
-                  className="flex-1 font-extrabold cursor-pointer select-none"
-                >
-                  {item}
-                </span>
-                <button
-                  onClick={() => removeItem(item)}
-                  className="text-gray-300 hover:text-red-400 font-black text-xl leading-none transition-colors"
-                >
-                  ×
-                </button>
+            {unchecked.map(row => (
+              <li key={row.id} className="flex items-center gap-3 bg-white rounded-2xl shadow-md border border-gray-100 px-4 py-3.5">
+                <span onClick={() => toggleItem(row)} className="w-6 h-6 rounded-lg border-2 border-gray-300 flex-shrink-0 cursor-pointer" />
+                <span onClick={() => toggleItem(row)} className="flex-1 font-extrabold cursor-pointer select-none">{row.item_name}</span>
+                <button onClick={() => removeItem(row.id)} className="text-gray-300 hover:text-red-400 font-black text-xl leading-none transition-colors">×</button>
               </li>
             ))}
           </ul>
-
           {done.length > 0 && (
             <>
               <p className="text-xs font-extrabold text-gray-400 uppercase tracking-widest mb-3">✅ Gekoop</p>
               <ul className="space-y-2">
-                {done.map(item => (
-                  <li
-                    key={item}
-                    className="flex items-center gap-3 bg-gray-50 rounded-2xl border border-gray-100 px-4 py-3.5 opacity-50"
-                  >
-                    <span
-                      onClick={() => toggleItem(item)}
-                      className="w-6 h-6 rounded-lg border-2 border-green-500 bg-green-500 flex-shrink-0 flex items-center justify-center text-white text-sm font-black cursor-pointer"
-                    >✓</span>
-                    <span
-                      onClick={() => toggleItem(item)}
-                      className="flex-1 line-through text-gray-400 font-bold cursor-pointer select-none"
-                    >
-                      {item}
-                    </span>
-                    <button
-                      onClick={() => removeItem(item)}
-                      className="text-gray-300 hover:text-red-400 font-black text-xl leading-none transition-colors"
-                    >
-                      ×
-                    </button>
+                {done.map(row => (
+                  <li key={row.id} className="flex items-center gap-3 bg-gray-50 rounded-2xl border border-gray-100 px-4 py-3.5 opacity-50">
+                    <span onClick={() => toggleItem(row)} className="w-6 h-6 rounded-lg border-2 border-green-500 bg-green-500 flex-shrink-0 flex items-center justify-center text-white text-sm font-black cursor-pointer">✓</span>
+                    <span onClick={() => toggleItem(row)} className="flex-1 line-through text-gray-400 font-bold cursor-pointer select-none">{row.item_name}</span>
+                    <button onClick={() => removeItem(row.id)} className="text-gray-300 hover:text-red-400 font-black text-xl leading-none transition-colors">×</button>
                   </li>
                 ))}
               </ul>
@@ -190,72 +306,18 @@ function ManualList({ categoryId }) {
 
 export default function ShoppingList() {
   const [activeTab, setActiveTab] = useState(null)
-  const [kosItems, setKosItems] = useState([])
-  const [kosChecked, setKosChecked] = useState(() => {
-    try { return JSON.parse(localStorage.getItem(KOS_CHECKED_KEY) ?? '{}') } catch { return {} }
-  })
-  const [loading, setLoading] = useState(true)
   const [planLabel, setPlanLabel] = useState('')
 
-  // On mount: clear kos items ticked more than 24 hours ago
   useEffect(() => {
-    const expired = Object.entries(kosChecked)
-      .filter(([, ts]) => typeof ts === 'number' && !isFresh(ts))
-    if (expired.length === 0) return
-    setKosChecked(prev => {
-      const next = Object.fromEntries(Object.entries(prev).filter(([, ts]) => isFresh(ts)))
-      localStorage.setItem(KOS_CHECKED_KEY, JSON.stringify(next))
-      return next
-    })
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  useEffect(() => {
-    async function load() {
-      const { data: planData } = await supabase
-        .from('weekly_plans')
-        .select('id, week_label')
-        .eq('is_active', true)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-
-      if (!planData) { setLoading(false); return }
-      setPlanLabel(planData.week_label ?? '')
-
-      const { data: pmData } = await supabase
-        .from('plan_meals')
-        .select('meal_id, meals(name, ingredients(item_name))')
-        .eq('plan_id', planData.id)
-        .not('meal_id', 'is', null)
-
-      setKosItems(aggregateIngredients(pmData ?? []))
-      setLoading(false)
-    }
-    load()
+    supabase
+      .from('weekly_plans')
+      .select('week_label')
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+      .then(({ data }) => { if (data) setPlanLabel(data.week_label ?? '') })
   }, [])
-
-  function toggleKosItem(key) {
-    setKosChecked(prev => {
-      const currentlyChecked = isFresh(prev[key])
-      const next = { ...prev, [key]: currentlyChecked ? false : Date.now() }
-      localStorage.setItem(KOS_CHECKED_KEY, JSON.stringify(next))
-      return next
-    })
-  }
-
-  function clearKosChecked() {
-    setKosChecked({})
-    localStorage.removeItem(KOS_CHECKED_KEY)
-  }
-
-  if (loading) return (
-    <div className="flex items-center justify-center h-48 text-gray-400 font-bold animate-pulse">
-      Laai inkopielys… 🛒
-    </div>
-  )
-
-  const kosUnchecked = kosItems.filter(item => !isFresh(kosChecked[item.item_name.toLowerCase()]))
-  const kosDone = kosItems.filter(item => isFresh(kosChecked[item.item_name.toLowerCase()]))
 
   return (
     <div className="max-w-lg mx-auto px-4 py-6">
@@ -267,7 +329,7 @@ export default function ShoppingList() {
         </div>
       </div>
 
-      {/* All category buttons visible in a grid */}
+      {/* All category buttons in a 3×3 grid */}
       <div className="grid grid-cols-3 gap-2 mb-5">
         {TABS.map(tab => (
           <button
@@ -285,81 +347,8 @@ export default function ShoppingList() {
         ))}
       </div>
 
-      {activeTab === 'kos' && (
-        <>
-          {kosItems.length === 0 ? (
-            <div className="text-center py-20">
-              <p className="text-6xl mb-4">🛒</p>
-              <p className="font-black text-lg text-gray-700">Nog geen bestanddele nie!</p>
-              <p className="text-sm text-gray-400 font-semibold mt-1">
-                Stoor eers 'n week se etes plan om jou inkopielys te genereer.
-              </p>
-            </div>
-          ) : (
-            <>
-              <div className="flex items-center justify-between mb-2">
-                <p className="text-sm font-extrabold text-gray-600 uppercase tracking-wide">Bestanddele</p>
-                {kosDone.length > 0 && (
-                  <button
-                    onClick={clearKosChecked}
-                    className="text-xs bg-red-50 text-red-400 font-extrabold px-3 py-1.5 rounded-xl"
-                  >
-                    🔄 Vee merke uit
-                  </button>
-                )}
-              </div>
-
-              {kosUnchecked.length > 0 && (
-                <p className="text-xs text-gray-400 font-bold mb-3">
-                  {kosUnchecked.length} item{kosUnchecked.length !== 1 ? 's' : ''} oor
-                </p>
-              )}
-
-              <ul className="space-y-2 mb-6">
-                {kosUnchecked.map(item => {
-                  const key = item.item_name.toLowerCase()
-                  return (
-                    <li
-                      key={key}
-                      onClick={() => toggleKosItem(key)}
-                      className="flex items-center gap-3 bg-white rounded-2xl shadow-md border border-gray-100 px-4 py-3.5 cursor-pointer select-none active:scale-98 transition-transform"
-                    >
-                      <span className="w-6 h-6 rounded-lg border-2 border-gray-300 flex-shrink-0" />
-                      <span className="flex-1 font-extrabold">{item.item_name}</span>
-                      <span className="text-gray-300">›</span>
-                    </li>
-                  )
-                })}
-              </ul>
-
-              {kosDone.length > 0 && (
-                <>
-                  <p className="text-xs font-extrabold text-gray-400 uppercase tracking-widest mb-3">
-                    ✅ In mandjie / het reeds
-                  </p>
-                  <ul className="space-y-2">
-                    {kosDone.map(item => {
-                      const key = item.item_name.toLowerCase()
-                      return (
-                        <li
-                          key={key}
-                          onClick={() => toggleKosItem(key)}
-                          className="flex items-center gap-3 bg-gray-50 rounded-2xl border border-gray-100 px-4 py-3.5 cursor-pointer select-none opacity-50"
-                        >
-                          <span className="w-6 h-6 rounded-lg border-2 border-green-500 bg-green-500 flex-shrink-0 flex items-center justify-center text-white text-sm font-black">✓</span>
-                          <span className="flex-1 line-through text-gray-400 font-bold">{item.item_name}</span>
-                        </li>
-                      )
-                    })}
-                  </ul>
-                </>
-              )}
-            </>
-          )}
-        </>
-      )}
-
-      {activeTab !== 'kos' && <ManualList key={activeTab} categoryId={activeTab} />}
+      {activeTab === 'kos' && <KosTab key="kos" planLabel={planLabel} />}
+      {activeTab && activeTab !== 'kos' && <ManualList key={activeTab} categoryId={activeTab} />}
     </div>
   )
 }
