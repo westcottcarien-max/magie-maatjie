@@ -5,12 +5,15 @@ const KOS_CHECKED_KEY = 'shopping-kos-checked'
 const EXPIRE_MS = 24 * 60 * 60 * 1000
 
 const TABS = [
-  { id: 'kos',    label: 'Kos Goete',       emoji: '🥦' },
-  { id: 'seep',   label: 'Seep Goete',       emoji: '🧼' },
-  { id: 'girls',  label: 'Girls Badkamer',   emoji: '💅' },
-  { id: 'ons',    label: 'Ons Badkamer',     emoji: '🚿' },
-  { id: 'bederf', label: 'Bederf Goete',     emoji: '🍫' },
-  { id: 'oops',   label: 'Oops Dit Is Klaar',emoji: '🙈' },
+  { id: 'kos',     label: 'Kos Goete',        emoji: '🥦' },
+  { id: 'ontbyt',  label: 'Ontbyt Kos',        emoji: '🥞' },
+  { id: 'blikke',  label: 'Kosblikke',         emoji: '🥫' },
+  { id: 'drink',   label: 'Drinkgoed',         emoji: '🧃' },
+  { id: 'seep',    label: 'Seep Goete',        emoji: '🧼' },
+  { id: 'girls',   label: 'Girls Badkamer',    emoji: '💅' },
+  { id: 'ons',     label: 'Ons Badkamer',      emoji: '🚿' },
+  { id: 'bederf',  label: 'Bederf Goete',      emoji: '🍫' },
+  { id: 'oops',    label: 'Oops Dit Is Klaar', emoji: '🙈' },
 ]
 
 function isFresh(ts) {
