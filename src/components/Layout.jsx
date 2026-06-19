@@ -1,9 +1,11 @@
 import { Outlet, NavLink } from 'react-router-dom'
 
 const navItems = [
-  { to: '/meals',    label: 'Maaltye',  icon: '🍽️' },
-  { to: '/plan',     label: 'Week se Etes', icon: '📅' },
-  { to: '/shopping', label: 'Inkopies', icon: '🛒' },
+  { to: '/meals',         label: 'Maaltye',       icon: '🍽️' },
+  { to: '/plan',          label: 'Week se Etes',  icon: '📅' },
+  { to: '/shopping',      label: 'Inkopies',      icon: '🛒' },
+  { to: '/hierdie-week',  label: 'Hierdie Week',  icon: '✅' },
+  { to: '/vorige-weke',   label: 'Vorige Weke',   icon: '📋' },
 ]
 
 export default function Layout() {
@@ -24,19 +26,19 @@ export default function Layout() {
       </main>
 
       <nav className="fixed bottom-0 left-0 right-0 bg-white border-t-2 border-green-100 safe-bottom z-50 shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
-        <div className="flex px-2 py-1 gap-1">
+        <div className="flex px-1 py-1 gap-0.5">
           {navItems.map(({ to, label, icon }) => (
             <NavLink
               key={to}
               to={to}
               className={({ isActive }) =>
-                `flex-1 flex flex-col items-center py-2 px-1 rounded-2xl text-xs font-extrabold transition-all ${
+                `flex-1 flex flex-col items-center py-1.5 px-0.5 rounded-xl text-[9px] font-extrabold transition-all leading-tight ${
                   isActive ? 'text-green-600 bg-green-50' : 'text-gray-400'
                 }`
               }
             >
-              <span className="text-2xl mb-0.5">{icon}</span>
-              {label}
+              <span className="text-xl mb-0.5">{icon}</span>
+              <span className="text-center">{label}</span>
             </NavLink>
           ))}
         </div>

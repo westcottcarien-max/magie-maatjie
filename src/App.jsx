@@ -6,6 +6,8 @@ import WeeklyPlan from './pages/WeeklyPlan'
 import FamilyShare from './pages/FamilyShare'
 import SelectionsView from './pages/SelectionsView'
 import ShoppingList from './pages/ShoppingList'
+import EtesVirDieWeek from './pages/EtesVirDieWeek'
+import VorigeWeke from './pages/VorigeWeke'
 
 export default function App() {
   return (
@@ -22,6 +24,8 @@ export default function App() {
         <Route path="/plan" element={<WeeklyPlan />} />
         <Route path="/plan/selections" element={<SelectionsView />} />
         <Route path="/shopping" element={<ShoppingList />} />
+        <Route path="/hierdie-week" element={<EtesVirDieWeek />} />
+        <Route path="/vorige-weke" element={<VorigeWeke />} />
       </Route>
     </Routes>
   )
