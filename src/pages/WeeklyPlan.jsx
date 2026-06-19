@@ -6,7 +6,7 @@ export default function WeeklyPlan() {
   const navigate = useNavigate()
   const [meals, setMeals] = useState([])
   const [selectedMealIds, setSelectedMealIds] = useState([])
-  const [pickerId, setPickerId] = useState('')
+  const [confirmed, setConfirmed] = useState(false)
   const [mealCount, setMealCount] = useState(7)
   const [weekLabel, setWeekLabel] = useState('')
   const [activePlan, setActivePlan] = useState(null)
@@ -36,6 +36,7 @@ export default function WeeklyPlan() {
           .sort((a, b) => a.day_index - b.day_index)
           .map(pm => pm.meal_id)
         setSelectedMealIds(sorted)
+        if (sorted.length > 0) setConfirmed(true)
       }
     }
     load()
@@ -43,12 +44,13 @@ export default function WeeklyPlan() {
 
   const mealMap = Object.fromEntries(meals.map(m => [m.id, m]))
   const selectedSet = new Set(selectedMealIds)
-  const availableMeals = meals.filter(m => !selectedSet.has(m.id))
 
-  function addMeal() {
-    if (!pickerId || selectedSet.has(pickerId)) return
-    setSelectedMealIds(prev => [...prev, pickerId])
-    setPickerId('')
+  function toggleMeal(id) {
+    if (selectedSet.has(id)) {
+      setSelectedMealIds(prev => prev.filter(mid => mid !== id))
+    } else {
+      setSelectedMealIds(prev => [...prev, id])
+    }
   }
 
   function removeMeal(id) {
@@ -59,6 +61,7 @@ export default function WeeklyPlan() {
     const count = Math.min(Math.max(1, mealCount), meals.length)
     const shuffled = [...meals].sort(() => Math.random() - 0.5)
     setSelectedMealIds(shuffled.slice(0, count).map(m => m.id))
+    setConfirmed(true)
   }
 
   async function savePlan() {
@@ -106,7 +109,7 @@ export default function WeeklyPlan() {
     <div className="max-w-lg mx-auto px-4 py-6">
       <div className="flex items-center gap-2 mb-6">
         <span className="text-3xl">📅</span>
-        <h2 className="text-2xl font-black">Weeklikse Plan</h2>
+        <h2 className="text-2xl font-black">Week se Etes</h2>
       </div>
 
       <div className="mb-5">
@@ -144,116 +147,148 @@ export default function WeeklyPlan() {
         </div>
       </div>
 
-      <div className="mb-4">
-        <label className="block text-sm font-extrabold text-gray-600 mb-2 uppercase tracking-wide">Voeg maaltyd by</label>
-        <div className="flex gap-2">
-          <select
-            value={pickerId}
-            onChange={e => setPickerId(e.target.value)}
-            className="flex-1 border-2 border-gray-200 rounded-xl px-3 py-2.5 font-bold text-sm focus:outline-none focus:border-green-400 bg-white"
-          >
-            <option value="">— Kies 'n maaltyd —</option>
-            {availableMeals.map(m => (
-              <option key={m.id} value={m.id}>{m.name}</option>
-            ))}
-          </select>
-          <button
-            onClick={addMeal}
-            disabled={!pickerId}
-            className="shrink-0 bg-green-500 text-white px-4 py-2.5 rounded-xl font-extrabold text-xl active:scale-95 transition-transform disabled:opacity-50"
-          >
-            +
-          </button>
-        </div>
-      </div>
-
-      <div className="mb-6">
-        <div className="flex items-center justify-between mb-3">
-          <p className="text-sm font-extrabold text-gray-600 uppercase tracking-wide">
-            Gekose Maaltye ({selectedMealIds.length})
-          </p>
-          {selectedMealIds.length > 0 && (
+      {/* CONFIRMED MODE — only show selected meals */}
+      {confirmed ? (
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-extrabold text-gray-600 uppercase tracking-wide">
+              Gekose Etes ({selectedMealIds.length})
+            </p>
             <button
-              onClick={() => setSelectedMealIds([])}
-              className="text-xs text-gray-400 font-bold"
+              onClick={() => setConfirmed(false)}
+              className="text-xs text-purple-500 font-extrabold"
             >
-              Maak alles skoon
+              ✏️ Verander Keuse
             </button>
+          </div>
+
+          {selectedMealIds.length === 0 ? (
+            <div className="text-center py-8 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">
+              <p className="text-3xl mb-2">🍽️</p>
+              <p className="text-sm font-bold text-gray-400">Geen maaltye gekies nie</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {selectedMealIds.map((id, i) => {
+                const meal = mealMap[id]
+                if (!meal) return null
+                return (
+                  <div
+                    key={id}
+                    className="flex items-center gap-3 bg-white border-2 border-green-100 rounded-2xl px-4 py-3 shadow-sm"
+                  >
+                    <span className="w-7 h-7 rounded-full bg-green-100 text-green-700 font-black text-xs flex items-center justify-center flex-shrink-0">
+                      {i + 1}
+                    </span>
+                    <span className="flex-1 font-extrabold text-sm">{meal.name}</span>
+                    <button
+                      onClick={() => removeMeal(id)}
+                      className="text-gray-300 hover:text-red-400 font-black text-xl leading-none transition-colors"
+                    >
+                      ×
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
           )}
         </div>
-
-        {selectedMealIds.length === 0 ? (
-          <div className="text-center py-8 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200">
-            <p className="text-3xl mb-2">🍽️</p>
-            <p className="text-sm font-bold text-gray-400">Geen maaltye gekies nie</p>
-            <p className="text-xs text-gray-300 font-semibold mt-1">Gebruik die knoppies hierbo om maaltye te kies.</p>
+      ) : (
+        /* SELECTING MODE — show all meals as checkboxes */
+        <div className="mb-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-sm font-extrabold text-gray-600 uppercase tracking-wide">
+              Kies jou etes ({selectedMealIds.length} gemerk)
+            </p>
+            {selectedMealIds.length > 0 && (
+              <button
+                onClick={() => setSelectedMealIds([])}
+                className="text-xs text-gray-400 font-bold"
+              >
+                Maak skoon
+              </button>
+            )}
           </div>
-        ) : (
-          <div className="space-y-2">
-            {selectedMealIds.map((id, i) => {
-              const meal = mealMap[id]
-              if (!meal) return null
+
+          <div className="space-y-2 mb-4">
+            {meals.map(meal => {
+              const isSelected = selectedSet.has(meal.id)
               return (
-                <div
-                  key={id}
-                  className="flex items-center gap-3 bg-white border-2 border-green-100 rounded-2xl px-4 py-3 shadow-sm"
+                <button
+                  key={meal.id}
+                  type="button"
+                  onClick={() => toggleMeal(meal.id)}
+                  className={`w-full text-left flex items-center gap-3 px-4 py-3 rounded-2xl border-2 transition-all active:scale-98 ${
+                    isSelected
+                      ? 'border-green-400 bg-green-50 shadow-sm'
+                      : 'border-gray-200 bg-white'
+                  }`}
                 >
-                  <span className="w-7 h-7 rounded-full bg-green-100 text-green-700 font-black text-xs flex items-center justify-center flex-shrink-0">
-                    {i + 1}
+                  <span className={`w-6 h-6 rounded-lg border-2 flex-shrink-0 flex items-center justify-center text-white text-sm font-black transition-all ${
+                    isSelected ? 'bg-green-500 border-green-500' : 'border-gray-300'
+                  }`}>
+                    {isSelected && '✓'}
                   </span>
-                  <span className="flex-1 font-extrabold text-sm">{meal.name}</span>
-                  <button
-                    onClick={() => removeMeal(id)}
-                    className="text-gray-300 hover:text-red-400 font-black text-xl leading-none transition-colors"
-                  >
-                    ×
-                  </button>
-                </div>
+                  <span className="font-extrabold text-sm">{meal.name}</span>
+                </button>
               )
             })}
           </div>
-        )}
-      </div>
 
-      <button
-        onClick={savePlan}
-        disabled={saving}
-        className="btn-primary disabled:opacity-50 mb-4"
-      >
-        {saving ? '⏳ Besig…' : activePlan ? '🔄 Opdateer Plan' : '🎉 Stoor Plan'}
-      </button>
-
-      {shareUrl && (
-        <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-4 space-y-3">
-          <p className="font-extrabold text-green-800">🔗 Deel met jou familie!</p>
-          <div className="flex gap-2">
-            <input
-              readOnly
-              value={shareUrl}
-              className="flex-1 text-xs border-2 border-gray-200 rounded-xl px-2 py-2 bg-white truncate font-mono"
-            />
+          {selectedMealIds.length > 0 && (
             <button
-              onClick={copyLink}
-              className="shrink-0 text-sm bg-white border-2 border-gray-200 rounded-xl px-3 py-2 font-extrabold"
+              onClick={() => setConfirmed(true)}
+              className="w-full bg-green-500 text-white py-4 rounded-2xl font-black text-base shadow-md active:scale-95 transition-transform"
             >
-              {copied ? '✅' : '📋'}
+              ✅ Etes Bevestig ({selectedMealIds.length} maaltye)
             </button>
-          </div>
-          <a
-            href={whatsappUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center justify-center gap-2 w-full bg-[#25D366] text-white py-3.5 rounded-2xl font-extrabold shadow-md active:scale-95 transition-transform"
-          >
-            💬 Deel op WhatsApp
-          </a>
-          <button
-            onClick={() => navigate('/plan/selections')}
-            className="btn-outline"
-          >
-            👀 Sien familie se keuses →
-          </button>
+          )}
         </div>
+      )}
+
+      {confirmed && (
+        <>
+          <button
+            onClick={savePlan}
+            disabled={saving}
+            className="btn-primary disabled:opacity-50 mb-4"
+          >
+            {saving ? '⏳ Besig…' : activePlan ? '🔄 Opdateer Plan' : '🎉 Stoor Plan'}
+          </button>
+
+          {shareUrl && (
+            <div className="bg-green-50 border-2 border-green-200 rounded-2xl p-4 space-y-3">
+              <p className="font-extrabold text-green-800">🔗 Deel met jou familie!</p>
+              <div className="flex gap-2">
+                <input
+                  readOnly
+                  value={shareUrl}
+                  className="flex-1 text-xs border-2 border-gray-200 rounded-xl px-2 py-2 bg-white truncate font-mono"
+                />
+                <button
+                  onClick={copyLink}
+                  className="shrink-0 text-sm bg-white border-2 border-gray-200 rounded-xl px-3 py-2 font-extrabold"
+                >
+                  {copied ? '✅' : '📋'}
+                </button>
+              </div>
+              <a
+                href={whatsappUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center justify-center gap-2 w-full bg-[#25D366] text-white py-3.5 rounded-2xl font-extrabold shadow-md active:scale-95 transition-transform"
+              >
+                💬 Deel op WhatsApp
+              </a>
+              <button
+                onClick={() => navigate('/plan/selections')}
+                className="btn-outline"
+              >
+                👀 Sien familie se keuses →
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   )

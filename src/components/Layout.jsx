@@ -2,7 +2,7 @@ import { Outlet, NavLink } from 'react-router-dom'
 
 const navItems = [
   { to: '/meals',    label: 'Maaltye',  icon: '🍽️' },
-  { to: '/plan',     label: 'Plan',     icon: '📅' },
+  { to: '/plan',     label: 'Week se Etes', icon: '📅' },
   { to: '/shopping', label: 'Inkopies', icon: '🛒' },
 ]
 
