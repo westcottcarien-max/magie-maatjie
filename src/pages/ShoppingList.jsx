@@ -2,15 +2,20 @@ import { useState, useEffect } from 'react'
 import { supabase } from '../lib/supabase'
 
 const KOS_CHECKED_KEY = 'shopping-kos-checked'
+const EXPIRE_MS = 24 * 60 * 60 * 1000
 
 const TABS = [
-  { id: 'kos',    label: 'Kos Goete',          emoji: '🥦' },
-  { id: 'seep',   label: 'Seep Goete',          emoji: '🧼' },
-  { id: 'girls',  label: 'Girls Badkamer',       emoji: '💅' },
-  { id: 'ons',    label: 'Ons Badkamer',         emoji: '🚿' },
-  { id: 'bederf', label: 'Bederf Goete',         emoji: '🍫' },
-  { id: 'oops',   label: 'Oops Dit Is Klaar',    emoji: '🙈' },
+  { id: 'kos',    label: 'Kos Goete',       emoji: '🥦' },
+  { id: 'seep',   label: 'Seep Goete',       emoji: '🧼' },
+  { id: 'girls',  label: 'Girls Badkamer',   emoji: '💅' },
+  { id: 'ons',    label: 'Ons Badkamer',     emoji: '🚿' },
+  { id: 'bederf', label: 'Bederf Goete',     emoji: '🍫' },
+  { id: 'oops',   label: 'Oops Dit Is Klaar',emoji: '🙈' },
 ]
+
+function isFresh(ts) {
+  return typeof ts === 'number' && Date.now() - ts <= EXPIRE_MS
+}
 
 function aggregateIngredients(planMeals) {
   const seen = new Set()
@@ -39,6 +44,27 @@ function ManualList({ categoryId }) {
   })
   const [newItem, setNewItem] = useState('')
 
+  // On mount: remove items that were ticked more than 24 hours ago
+  useEffect(() => {
+    const expiredKeys = new Set(
+      Object.entries(checked)
+        .filter(([, ts]) => typeof ts === 'number' && !isFresh(ts))
+        .map(([k]) => k)
+    )
+    if (expiredKeys.size === 0) return
+
+    setItems(prev => {
+      const next = prev.filter(i => !expiredKeys.has(i.toLowerCase()))
+      localStorage.setItem(itemsKey, JSON.stringify(next))
+      return next
+    })
+    setChecked(prev => {
+      const next = Object.fromEntries(Object.entries(prev).filter(([k]) => !expiredKeys.has(k)))
+      localStorage.setItem(checkedKey, JSON.stringify(next))
+      return next
+    })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   function addItem() {
     const trimmed = newItem.trim()
     if (!trimmed) return
@@ -60,13 +86,14 @@ function ManualList({ categoryId }) {
 
   function toggleItem(item) {
     const key = item.toLowerCase()
-    const next = { ...checked, [key]: !checked[key] }
+    const currentlyChecked = isFresh(checked[key])
+    const next = { ...checked, [key]: currentlyChecked ? false : Date.now() }
     setChecked(next)
     localStorage.setItem(checkedKey, JSON.stringify(next))
   }
 
-  const unchecked = items.filter(i => !checked[i.toLowerCase()])
-  const done = items.filter(i => checked[i.toLowerCase()])
+  const unchecked = items.filter(i => !isFresh(checked[i.toLowerCase()]))
+  const done = items.filter(i => isFresh(checked[i.toLowerCase()]))
 
   return (
     <div>
@@ -167,6 +194,18 @@ export default function ShoppingList() {
   const [loading, setLoading] = useState(true)
   const [planLabel, setPlanLabel] = useState('')
 
+  // On mount: clear kos items ticked more than 24 hours ago
+  useEffect(() => {
+    const expired = Object.entries(kosChecked)
+      .filter(([, ts]) => typeof ts === 'number' && !isFresh(ts))
+    if (expired.length === 0) return
+    setKosChecked(prev => {
+      const next = Object.fromEntries(Object.entries(prev).filter(([, ts]) => isFresh(ts)))
+      localStorage.setItem(KOS_CHECKED_KEY, JSON.stringify(next))
+      return next
+    })
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     async function load() {
       const { data: planData } = await supabase
@@ -194,7 +233,8 @@ export default function ShoppingList() {
 
   function toggleKosItem(key) {
     setKosChecked(prev => {
-      const next = { ...prev, [key]: !prev[key] }
+      const currentlyChecked = isFresh(prev[key])
+      const next = { ...prev, [key]: currentlyChecked ? false : Date.now() }
       localStorage.setItem(KOS_CHECKED_KEY, JSON.stringify(next))
       return next
     })
@@ -211,8 +251,8 @@ export default function ShoppingList() {
     </div>
   )
 
-  const kosUnchecked = kosItems.filter(item => !kosChecked[item.item_name.toLowerCase()])
-  const kosDone = kosItems.filter(item => kosChecked[item.item_name.toLowerCase()])
+  const kosUnchecked = kosItems.filter(item => !isFresh(kosChecked[item.item_name.toLowerCase()]))
+  const kosDone = kosItems.filter(item => isFresh(kosChecked[item.item_name.toLowerCase()]))
 
   return (
     <div className="max-w-lg mx-auto px-4 py-6">
@@ -224,7 +264,6 @@ export default function ShoppingList() {
         </div>
       </div>
 
-      {/* Scrollable tab bar */}
       <div className="flex gap-2 overflow-x-auto pb-2 mb-5" style={{ scrollbarWidth: 'none' }}>
         {TABS.map(tab => (
           <button
@@ -242,7 +281,6 @@ export default function ShoppingList() {
         ))}
       </div>
 
-      {/* KOS GOETE — ingredients from saved plan */}
       {activeTab === 'kos' && (
         <>
           {kosItems.length === 0 ? (
@@ -317,7 +355,6 @@ export default function ShoppingList() {
         </>
       )}
 
-      {/* All other tabs — manual lists */}
       {activeTab !== 'kos' && <ManualList key={activeTab} categoryId={activeTab} />}
     </div>
   )
