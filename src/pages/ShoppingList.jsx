@@ -318,7 +318,7 @@ export default function ShoppingList() {
       )}
 
       {/* All other tabs — manual lists */}
-      {activeTab !== 'kos' && <ManualList categoryId={activeTab} />}
+      {activeTab !== 'kos' && <ManualList key={activeTab} categoryId={activeTab} />}
     </div>
   )
 }
