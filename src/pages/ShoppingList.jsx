@@ -189,7 +189,7 @@ function ManualList({ categoryId }) {
 }
 
 export default function ShoppingList() {
-  const [activeTab, setActiveTab] = useState('kos')
+  const [activeTab, setActiveTab] = useState(null)
   const [kosItems, setKosItems] = useState([])
   const [kosChecked, setKosChecked] = useState(() => {
     try { return JSON.parse(localStorage.getItem(KOS_CHECKED_KEY) ?? '{}') } catch { return {} }
@@ -267,18 +267,19 @@ export default function ShoppingList() {
         </div>
       </div>
 
-      <div className="flex gap-2 overflow-x-auto pb-2 mb-5" style={{ scrollbarWidth: 'none' }}>
+      {/* All category buttons visible in a grid */}
+      <div className="grid grid-cols-3 gap-2 mb-5">
         {TABS.map(tab => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id)}
-            className={`shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl font-extrabold text-xs transition-all whitespace-nowrap ${
+            onClick={() => setActiveTab(prev => prev === tab.id ? null : tab.id)}
+            className={`flex flex-col items-center justify-center gap-1 px-2 py-3 rounded-2xl font-extrabold text-[11px] text-center leading-tight transition-all active:scale-95 ${
               activeTab === tab.id
                 ? 'bg-green-500 text-white shadow-md'
                 : 'bg-gray-100 text-gray-600'
             }`}
           >
-            <span>{tab.emoji}</span>
+            <span className="text-2xl">{tab.emoji}</span>
             <span>{tab.label}</span>
           </button>
         ))}
