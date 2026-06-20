@@ -81,8 +81,14 @@ function KosTab({ planLabel }) {
     // Realtime subscription
     const channel = supabase
       .channel('kos-items')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_items', filter: 'category=eq.kos' }, () => {
-        supabase.from('shopping_items').select('*').eq('category', 'kos').then(({ data }) => setDbItems(data ?? []))
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'shopping_items', filter: 'category=eq.kos' }, ({ new: row }) => {
+        setDbItems(prev => [...prev.filter(r => r.id !== row.id), row])
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'shopping_items', filter: 'category=eq.kos' }, ({ new: row }) => {
+        setDbItems(prev => prev.map(r => r.id === row.id ? row : r))
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'shopping_items', filter: 'category=eq.kos' }, ({ old: row }) => {
+        setDbItems(prev => prev.filter(r => r.id !== row.id))
       })
       .subscribe()
 
@@ -208,13 +214,14 @@ function ManualList({ categoryId }) {
 
     const channel = supabase
       .channel(`manual-${categoryId}`)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_items', filter: `category=eq.${categoryId}` }, () => {
-        supabase
-          .from('shopping_items')
-          .select('*')
-          .eq('category', categoryId)
-          .order('created_at', { ascending: true })
-          .then(({ data }) => setRows(data ?? []))
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'shopping_items', filter: `category=eq.${categoryId}` }, ({ new: row }) => {
+        setRows(prev => [...prev.filter(r => r.id !== row.id), row])
+      })
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'shopping_items', filter: `category=eq.${categoryId}` }, ({ new: row }) => {
+        setRows(prev => prev.map(r => r.id === row.id ? row : r))
+      })
+      .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'shopping_items', filter: `category=eq.${categoryId}` }, ({ old: row }) => {
+        setRows(prev => prev.filter(r => r.id !== row.id))
       })
       .subscribe()
 
