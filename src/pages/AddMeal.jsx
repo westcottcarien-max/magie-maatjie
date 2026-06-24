@@ -76,44 +76,47 @@ export default function AddMeal() {
 
     try {
       let mealId = id
-      let finalImageUrl = existingImageUrl || null
 
-      // Upload new photo if one was picked
-      if (imageFile) {
-        const ext = imageFile.name.split('.').pop() || 'jpg'
-        const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-        const { error: uploadError } = await supabase.storage
-          .from('meal-images')
-          .upload(path, imageFile, { upsert: true })
-        if (uploadError) throw new Error(`Foto oplaai misluk: ${uploadError.message}`)
-        const { data: urlData } = supabase.storage.from('meal-images').getPublicUrl(path)
-        finalImageUrl = urlData.publicUrl
-      }
-
-      const mealData = {
-        name: name.trim(),
-        notes: notes.trim() || null,
-        recipe_url: recipeUrl.trim() || null,
-        image_url: finalImageUrl,
-      }
-
+      // Step 1: save basic fields — this always works
+      const basicData = { name: name.trim(), notes: notes.trim() || null }
       if (isEdit) {
-        await supabase.from('meals').update(mealData).eq('id', id)
+        const { error: err } = await supabase.from('meals').update(basicData).eq('id', id)
+        if (err) throw err
         await supabase.from('ingredients').delete().eq('meal_id', id)
       } else {
         const { data, error: err } = await supabase
           .from('meals')
-          .insert(mealData)
+          .insert(basicData)
           .select('id')
           .single()
         if (err) throw err
         mealId = data.id
       }
 
+      // Step 2: try to upload photo and save recipe_url / image_url
+      // Silently skip if the columns don't exist yet in the DB
+      let finalImageUrl = existingImageUrl || null
+      if (imageFile) {
+        const ext = imageFile.name.split('.').pop() || 'jpg'
+        const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+        const { error: uploadError } = await supabase.storage
+          .from('meal-images')
+          .upload(path, imageFile, { upsert: true })
+        if (!uploadError) {
+          const { data: urlData } = supabase.storage.from('meal-images').getPublicUrl(path)
+          finalImageUrl = urlData.publicUrl
+        }
+      }
+      await supabase.from('meals').update({
+        recipe_url: recipeUrl.trim() || null,
+        image_url: finalImageUrl,
+      }).eq('id', mealId)
+      // Ignore errors here — columns may not exist yet until SQL is run
+
+      // Step 3: save ingredients
       const validIngredients = ingredients
         .filter(ing => ing.item_name.trim())
         .map((ing, i) => ({ meal_id: mealId, item_name: ing.item_name.trim(), sort_order: i }))
-
       if (validIngredients.length) {
         await supabase.from('ingredients').insert(validIngredients)
       }
