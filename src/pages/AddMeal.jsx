@@ -13,6 +13,8 @@ export default function AddMeal() {
 
   const [name, setName] = useState('')
   const [notes, setNotes] = useState('')
+  const [recipeUrl, setRecipeUrl] = useState('')
+  const [imageUrl, setImageUrl] = useState('')
   const [ingredients, setIngredients] = useState([emptyIngredient()])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -23,7 +25,12 @@ export default function AddMeal() {
       try {
         const { data: meal } = await supabase.from('meals').select('*').eq('id', id).maybeSingle()
         const { data: ings } = await supabase.from('ingredients').select('*').eq('meal_id', id).order('sort_order')
-        if (meal) { setName(meal.name); setNotes(meal.notes ?? '') }
+        if (meal) {
+          setName(meal.name)
+          setNotes(meal.notes ?? '')
+          setRecipeUrl(meal.recipe_url ?? '')
+          setImageUrl(meal.image_url ?? '')
+        }
         if (ings?.length) setIngredients(ings)
       } catch (err) {
         setError('Kon maaltyd nie laai nie.')
@@ -53,13 +60,20 @@ export default function AddMeal() {
     try {
       let mealId = id
 
+      const mealData = {
+        name: name.trim(),
+        notes: notes.trim(),
+        recipe_url: recipeUrl.trim() || null,
+        image_url: imageUrl.trim() || null,
+      }
+
       if (isEdit) {
-        await supabase.from('meals').update({ name: name.trim(), notes: notes.trim() }).eq('id', id)
+        await supabase.from('meals').update(mealData).eq('id', id)
         await supabase.from('ingredients').delete().eq('meal_id', id)
       } else {
         const { data, error: err } = await supabase
           .from('meals')
-          .insert({ name: name.trim(), notes: notes.trim() })
+          .insert(mealData)
           .select('id')
           .single()
         if (err) throw err
@@ -165,6 +179,36 @@ export default function AddMeal() {
             rows={4}
             className="input-field resize-none"
           />
+        </div>
+
+        <div>
+          <label className="block text-sm font-extrabold text-gray-600 mb-2 uppercase tracking-wide">Resep Skakel (TikTok, YouTube, ens.)</label>
+          <input
+            type="url"
+            value={recipeUrl}
+            onChange={e => setRecipeUrl(e.target.value)}
+            placeholder="https://www.tiktok.com/..."
+            className="input-field"
+          />
+        </div>
+
+        <div>
+          <label className="block text-sm font-extrabold text-gray-600 mb-2 uppercase tracking-wide">Foto Skakel (plak 'n foto-URL)</label>
+          <input
+            type="url"
+            value={imageUrl}
+            onChange={e => setImageUrl(e.target.value)}
+            placeholder="https://..."
+            className="input-field"
+          />
+          {imageUrl.trim() && (
+            <img
+              src={imageUrl.trim()}
+              alt="voorskou"
+              className="mt-2 rounded-xl max-h-40 object-cover"
+              onError={e => { e.target.style.display = 'none' }}
+            />
+          )}
         </div>
 
         <button

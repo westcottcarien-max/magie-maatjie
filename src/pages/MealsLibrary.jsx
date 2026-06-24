@@ -6,11 +6,12 @@ export default function MealsLibrary() {
   const [meals, setMeals] = useState([])
   const [loading, setLoading] = useState(true)
   const [deleting, setDeleting] = useState(null)
+  const [expandedPhoto, setExpandedPhoto] = useState(null)
 
   async function fetchMeals() {
     const { data } = await supabase
       .from('meals')
-      .select('id, name, notes, ingredients(id)')
+      .select('id, name, notes, recipe_url, image_url, ingredients(id)')
       .order('created_at', { ascending: false })
     setMeals(data ?? [])
     setLoading(false)
@@ -61,13 +62,43 @@ export default function MealsLibrary() {
             return (
               <li key={meal.id} className={`bg-white rounded-2xl shadow-md border border-gray-100 border-l-4 ${color} p-4`}>
                 <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <p className="font-extrabold text-base truncate">{meal.name}</p>
                     <p className="text-xs text-gray-400 font-bold mt-0.5">
                       🥬 {meal.ingredients?.length ?? 0} bestanddeel{meal.ingredients?.length !== 1 ? 'e' : ''}
                     </p>
                     {meal.notes && (
                       <p className="text-sm text-gray-500 mt-1 line-clamp-2 font-medium">{meal.notes}</p>
+                    )}
+                    {(meal.recipe_url || meal.image_url) && (
+                      <div className="flex gap-2 mt-2 flex-wrap">
+                        {meal.recipe_url && (
+                          <a
+                            href={meal.recipe_url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="text-xs bg-blue-50 text-blue-600 font-extrabold px-3 py-1.5 rounded-xl"
+                          >
+                            🔗 Resep
+                          </a>
+                        )}
+                        {meal.image_url && (
+                          <button
+                            onClick={() => setExpandedPhoto(prev => prev === meal.id ? null : meal.id)}
+                            className="text-xs bg-purple-50 text-purple-600 font-extrabold px-3 py-1.5 rounded-xl"
+                          >
+                            {expandedPhoto === meal.id ? '🙈 Verberg' : '📷 Foto'}
+                          </button>
+                        )}
+                      </div>
+                    )}
+                    {expandedPhoto === meal.id && meal.image_url && (
+                      <img
+                        src={meal.image_url}
+                        alt={meal.name}
+                        className="mt-3 rounded-2xl w-full max-h-64 object-cover"
+                        onError={e => { e.target.style.display = 'none' }}
+                      />
                     )}
                   </div>
                   <div className="flex flex-col gap-1.5 shrink-0">

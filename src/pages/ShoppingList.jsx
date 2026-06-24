@@ -232,9 +232,12 @@ function ManualList({ categoryId }) {
     const trimmed = newItem.trim()
     if (!trimmed) return
     setNewItem('')
-    await supabase
+    const { data: row } = await supabase
       .from('shopping_items')
       .upsert({ category: categoryId, item_name: trimmed, checked_at: null }, { onConflict: 'category,item_name' })
+      .select()
+      .single()
+    if (row) setRows(prev => [...prev.filter(r => r.id !== row.id), row])
   }
 
   async function removeItem(id) {
