@@ -259,7 +259,6 @@ export default function AddMeal() {
             ref={fileInputRef}
             type="file"
             accept="image/*"
-            capture="environment"
             onChange={handleImagePick}
             className="hidden"
           />
