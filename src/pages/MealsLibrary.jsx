@@ -9,10 +9,18 @@ export default function MealsLibrary() {
   const [expandedPhoto, setExpandedPhoto] = useState(null)
 
   async function fetchMeals() {
-    const { data } = await supabase
+    // Try with new columns first; fall back if they don't exist in DB yet
+    let { data, error } = await supabase
       .from('meals')
       .select('id, name, notes, recipe_url, image_url, ingredients(id)')
       .order('created_at', { ascending: false })
+    if (error) {
+      const fallback = await supabase
+        .from('meals')
+        .select('id, name, notes, ingredients(id)')
+        .order('created_at', { ascending: false })
+      data = fallback.data
+    }
     setMeals(data ?? [])
     setLoading(false)
   }
