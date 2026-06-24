@@ -1,8 +1,7 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import IngredientRow from '../components/IngredientRow'
-
 
 const emptyIngredient = () => ({ item_name: '' })
 
@@ -10,11 +9,14 @@ export default function AddMeal() {
   const { id } = useParams()
   const navigate = useNavigate()
   const isEdit = Boolean(id)
+  const fileInputRef = useRef(null)
 
   const [name, setName] = useState('')
   const [notes, setNotes] = useState('')
   const [recipeUrl, setRecipeUrl] = useState('')
-  const [imageUrl, setImageUrl] = useState('')
+  const [existingImageUrl, setExistingImageUrl] = useState('')
+  const [imageFile, setImageFile] = useState(null)
+  const [imagePreview, setImagePreview] = useState('')
   const [ingredients, setIngredients] = useState([emptyIngredient()])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
@@ -29,7 +31,8 @@ export default function AddMeal() {
           setName(meal.name)
           setNotes(meal.notes ?? '')
           setRecipeUrl(meal.recipe_url ?? '')
-          setImageUrl(meal.image_url ?? '')
+          setExistingImageUrl(meal.image_url ?? '')
+          setImagePreview(meal.image_url ?? '')
         }
         if (ings?.length) setIngredients(ings)
       } catch (err) {
@@ -38,6 +41,20 @@ export default function AddMeal() {
     }
     load()
   }, [id, isEdit])
+
+  function handleImagePick(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    setImageFile(file)
+    setImagePreview(URL.createObjectURL(file))
+  }
+
+  function removeImage() {
+    setImageFile(null)
+    setImagePreview('')
+    setExistingImageUrl('')
+    if (fileInputRef.current) fileInputRef.current.value = ''
+  }
 
   function updateIngredient(index, field, value) {
     setIngredients(prev => prev.map((ing, i) => i === index ? { ...ing, [field]: value } : ing))
@@ -59,12 +76,25 @@ export default function AddMeal() {
 
     try {
       let mealId = id
+      let finalImageUrl = existingImageUrl || null
+
+      // Upload new photo if one was picked
+      if (imageFile) {
+        const ext = imageFile.name.split('.').pop() || 'jpg'
+        const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+        const { error: uploadError } = await supabase.storage
+          .from('meal-images')
+          .upload(path, imageFile, { upsert: true })
+        if (uploadError) throw new Error(`Foto oplaai misluk: ${uploadError.message}`)
+        const { data: urlData } = supabase.storage.from('meal-images').getPublicUrl(path)
+        finalImageUrl = urlData.publicUrl
+      }
 
       const mealData = {
         name: name.trim(),
-        notes: notes.trim(),
+        notes: notes.trim() || null,
         recipe_url: recipeUrl.trim() || null,
-        image_url: imageUrl.trim() || null,
+        image_url: finalImageUrl,
       }
 
       if (isEdit) {
@@ -182,7 +212,9 @@ export default function AddMeal() {
         </div>
 
         <div>
-          <label className="block text-sm font-extrabold text-gray-600 mb-2 uppercase tracking-wide">Resep Skakel (TikTok, YouTube, ens.)</label>
+          <label className="block text-sm font-extrabold text-gray-600 mb-2 uppercase tracking-wide">
+            Resep Skakel <span className="text-gray-400 font-semibold normal-case">(opsioneel — TikTok, YouTube, ens.)</span>
+          </label>
           <input
             type="url"
             value={recipeUrl}
@@ -193,22 +225,44 @@ export default function AddMeal() {
         </div>
 
         <div>
-          <label className="block text-sm font-extrabold text-gray-600 mb-2 uppercase tracking-wide">Foto Skakel (plak 'n foto-URL)</label>
-          <input
-            type="url"
-            value={imageUrl}
-            onChange={e => setImageUrl(e.target.value)}
-            placeholder="https://..."
-            className="input-field"
-          />
-          {imageUrl.trim() && (
-            <img
-              src={imageUrl.trim()}
-              alt="voorskou"
-              className="mt-2 rounded-xl max-h-40 object-cover"
-              onError={e => { e.target.style.display = 'none' }}
-            />
+          <label className="block text-sm font-extrabold text-gray-600 mb-2 uppercase tracking-wide">
+            Foto <span className="text-gray-400 font-semibold normal-case">(opsioneel)</span>
+          </label>
+
+          {imagePreview ? (
+            <div className="relative">
+              <img
+                src={imagePreview}
+                alt="voorskou"
+                className="w-full max-h-56 object-cover rounded-2xl"
+              />
+              <button
+                type="button"
+                onClick={removeImage}
+                className="absolute top-2 right-2 bg-red-500 text-white w-8 h-8 rounded-full font-black text-lg flex items-center justify-center shadow-lg"
+              >
+                ×
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              className="w-full border-2 border-dashed border-gray-300 rounded-2xl py-8 flex flex-col items-center gap-2 text-gray-400 active:scale-95 transition-transform"
+            >
+              <span className="text-4xl">📷</span>
+              <span className="font-extrabold text-sm">Kies foto van foon</span>
+            </button>
           )}
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={handleImagePick}
+            className="hidden"
+          />
         </div>
 
         <button
