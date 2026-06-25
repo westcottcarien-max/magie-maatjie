@@ -74,10 +74,10 @@ export default function AddMeal() {
     setSaving(true)
     setError(null)
 
-    try {
-      let mealId = id
+    let mealId = id
 
-      // Step 1: save basic fields — this always works
+    // Phase 1: save meal + ingredients — if this fails, stop and show error
+    try {
       const basicData = { name: name.trim(), notes: notes.trim() || null }
       if (isEdit) {
         const { error: err } = await supabase.from('meals').update(basicData).eq('id', id)
@@ -93,49 +93,38 @@ export default function AddMeal() {
         mealId = data.id
       }
 
-      // Step 2: upload photo if one was picked
-      let finalImageUrl = existingImageUrl || null
-      if (imageFile) {
-        const ext = imageFile.name.split('.').pop() || 'jpg'
-        const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-        const { error: uploadError } = await supabase.storage
-          .from('meal-images')
-          .upload(path, imageFile, { upsert: true })
-        if (uploadError) {
-          throw new Error('Foto kon nie gestoor word nie. Maak seker die "meal-images" bucket bestaan in Supabase Storage.')
-        }
-        const { data: urlData } = supabase.storage.from('meal-images').getPublicUrl(path)
-        finalImageUrl = urlData.publicUrl
-      }
-
-      // Step 3: save recipe_url / image_url (needs SQL columns to exist)
-      const { error: extraErr } = await supabase.from('meals').update({
-        recipe_url: recipeUrl.trim() || null,
-        image_url: finalImageUrl,
-      }).eq('id', mealId)
-      if (extraErr) {
-        throw new Error('Foto/skakel kon nie gestoor word nie. Hardloop eers die SQL in Supabase:\nalter table meals add column if not exists recipe_url text;\nalter table meals add column if not exists image_url text;')
-      }
-
-      // Step 4: save ingredients
       const validIngredients = ingredients
         .filter(ing => ing.item_name.trim())
         .map((ing, i) => ({ meal_id: mealId, item_name: ing.item_name.trim(), sort_order: i }))
       if (validIngredients.length) {
         await supabase.from('ingredients').insert(validIngredients)
       }
-
-      navigate('/meals')
     } catch (err) {
-      // If only the photo/link step failed the meal was already saved — go back anyway
-      if (err.message.includes('gestoor word nie')) {
-        setError(err.message)
-        setSaving(false)
-      } else {
-        setError(err.message)
-        setSaving(false)
+      setError(err.message)
+      setSaving(false)
+      return
+    }
+
+    // Phase 2: try to save photo + recipe_url — silently ignored if columns/bucket missing
+    let finalImageUrl = existingImageUrl || null
+    if (imageFile) {
+      const ext = imageFile.name.split('.').pop() || 'jpg'
+      const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
+      const { error: uploadError } = await supabase.storage
+        .from('meal-images')
+        .upload(path, imageFile, { upsert: true })
+      if (!uploadError) {
+        const { data: urlData } = supabase.storage.from('meal-images').getPublicUrl(path)
+        finalImageUrl = urlData.publicUrl
       }
     }
+    await supabase.from('meals').update({
+      recipe_url: recipeUrl.trim() || null,
+      image_url: finalImageUrl,
+    }).eq('id', mealId)
+    // errors here are ignored — meal is already saved above
+
+    navigate('/meals')
   }
 
   async function handleDelete() {
