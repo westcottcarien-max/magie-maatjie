@@ -7,7 +7,7 @@ const ROOMS = [
   { id: 'sitkamer',   label: 'Sitkamer',         emoji: '🛋️' },
   { id: 'patio',      label: 'Patio',            emoji: '🪴' },
   { id: 'buite',      label: 'Buite',            emoji: '🌿' },
-  { id: 'gangen',     label: 'Gangen & Trappe',  emoji: '🚪' },
+  { id: 'gangen',     label: 'Gang & Trappe',    emoji: '🚪' },
   { id: 'raikie',     label: "Raaikie se Kamer", emoji: '🌸' },
   { id: 'lala',       label: 'Lalaloops Kamer',  emoji: '🦄' },
   { id: 'girlsbad',   label: 'Girls Badkamer',   emoji: '💅' },
