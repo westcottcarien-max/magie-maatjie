@@ -2,6 +2,15 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
+function decodeMealNotes(raw) {
+  if (!raw) return { text: '', image: null, recipe: null }
+  try {
+    const d = JSON.parse(raw)
+    if (d && d._v === 1) return { text: d.t ?? '', image: d.i ?? null, recipe: d.r ?? null }
+  } catch {}
+  return { text: raw, image: null, recipe: null }
+}
+
 export default function MealsLibrary() {
   const [meals, setMeals] = useState([])
   const [loading, setLoading] = useState(true)
@@ -11,17 +20,10 @@ export default function MealsLibrary() {
   const [loadingDetail, setLoadingDetail] = useState(null)
 
   async function fetchMeals() {
-    let { data, error } = await supabase
+    const { data } = await supabase
       .from('meals')
-      .select('id, name, notes, recipe_url, image_url, ingredients(id)')
+      .select('id, name, notes, ingredients(id)')
       .order('created_at', { ascending: false })
-    if (error) {
-      const fallback = await supabase
-        .from('meals')
-        .select('id, name, notes, ingredients(id)')
-        .order('created_at', { ascending: false })
-      data = fallback.data
-    }
     setMeals(data ?? [])
     setLoading(false)
   }
@@ -85,6 +87,7 @@ export default function MealsLibrary() {
             const isOpen = expandedId === meal.id
             const ingredients = detailCache[meal.id] ?? []
             const isLoadingThis = loadingDetail === meal.id
+            const { text: notesText, image: mealImage, recipe: mealRecipe } = decodeMealNotes(meal.notes)
 
             return (
               <li key={meal.id} className={`bg-white rounded-2xl shadow-md border border-gray-100 border-l-4 ${color} overflow-hidden`}>
@@ -123,16 +126,16 @@ export default function MealsLibrary() {
                           </div>
                         )}
 
-                        {meal.notes && (
+                        {notesText && (
                           <div>
                             <p className="text-xs font-extrabold text-gray-500 uppercase tracking-wider mb-1">Notas</p>
-                            <p className="text-sm text-gray-600 font-medium">{meal.notes}</p>
+                            <p className="text-sm text-gray-600 font-medium">{notesText}</p>
                           </div>
                         )}
 
-                        {meal.image_url && (
+                        {mealImage && (
                           <img
-                            src={meal.image_url}
+                            src={mealImage}
                             alt={meal.name}
                             className="w-full max-h-64 object-cover rounded-2xl"
                             onError={e => { e.target.style.display = 'none' }}
@@ -140,9 +143,9 @@ export default function MealsLibrary() {
                         )}
 
                         <div className="flex gap-2 flex-wrap pt-1">
-                          {meal.recipe_url && (
+                          {mealRecipe && (
                             <a
-                              href={meal.recipe_url}
+                              href={mealRecipe}
                               target="_blank"
                               rel="noopener noreferrer"
                               onClick={e => e.stopPropagation()}

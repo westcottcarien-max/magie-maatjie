@@ -5,7 +5,22 @@ import IngredientRow from '../components/IngredientRow'
 
 const emptyIngredient = () => ({ item_name: '' })
 
-// Compress picked image to a small JPEG base64 string — no storage bucket needed
+// Store photo + recipe inside the existing notes column as JSON.
+// Plain-text notes (old meals) are never touched.
+function encodeMealNotes(text, image, recipe) {
+  if (!image && !recipe) return text || null
+  return JSON.stringify({ _v: 1, t: text || '', i: image || null, r: recipe || null })
+}
+
+function decodeMealNotes(raw) {
+  if (!raw) return { text: '', image: null, recipe: null }
+  try {
+    const d = JSON.parse(raw)
+    if (d && d._v === 1) return { text: d.t ?? '', image: d.i ?? null, recipe: d.r ?? null }
+  } catch {}
+  return { text: raw, image: null, recipe: null }
+}
+
 function compressToBase64(file) {
   return new Promise(resolve => {
     const canvas = document.createElement('canvas')
@@ -33,20 +48,11 @@ export default function AddMeal() {
   const [name, setName] = useState('')
   const [notes, setNotes] = useState('')
   const [recipeUrl, setRecipeUrl] = useState('')
-  const [existingImageUrl, setExistingImageUrl] = useState('')
   const [imageFile, setImageFile] = useState(null)
   const [imagePreview, setImagePreview] = useState('')
   const [ingredients, setIngredients] = useState([emptyIngredient()])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
-  const [columnsReady, setColumnsReady] = useState(false)
-
-  // Check if recipe_url / image_url columns exist in the DB
-  useEffect(() => {
-    supabase.from('meals').select('recipe_url').limit(1).then(({ error }) => {
-      setColumnsReady(!error)
-    })
-  }, [])
 
   useEffect(() => {
     if (!isEdit) return
@@ -56,10 +62,10 @@ export default function AddMeal() {
         const { data: ings } = await supabase.from('ingredients').select('*').eq('meal_id', id).order('sort_order')
         if (meal) {
           setName(meal.name)
-          setNotes(meal.notes ?? '')
-          setRecipeUrl(meal.recipe_url ?? '')
-          setExistingImageUrl(meal.image_url ?? '')
-          setImagePreview(meal.image_url ?? '')
+          const decoded = decodeMealNotes(meal.notes)
+          setNotes(decoded.text)
+          setRecipeUrl(decoded.recipe ?? '')
+          setImagePreview(decoded.image ?? '')
         }
         if (ings?.length) setIngredients(ings)
       } catch (err) {
@@ -79,7 +85,6 @@ export default function AddMeal() {
   function removeImage() {
     setImageFile(null)
     setImagePreview('')
-    setExistingImageUrl('')
     if (fileInputRef.current) fileInputRef.current.value = ''
   }
 
@@ -101,19 +106,26 @@ export default function AddMeal() {
     setSaving(true)
     setError(null)
 
-    let mealId = id
-
-    // Phase 1: save meal name + notes + ingredients — always works
     try {
-      const basicData = { name: name.trim(), notes: notes.trim() || null }
+      let mealId = id
+
+      // Compress new photo if one was picked
+      let finalImage = imagePreview || null
+      if (imageFile) {
+        finalImage = await compressToBase64(imageFile)
+      }
+
+      const notesValue = encodeMealNotes(notes.trim(), finalImage, recipeUrl.trim() || null)
+
       if (isEdit) {
-        const { error: err } = await supabase.from('meals').update(basicData).eq('id', id)
+        const { error: err } = await supabase.from('meals')
+          .update({ name: name.trim(), notes: notesValue })
+          .eq('id', id)
         if (err) throw err
         await supabase.from('ingredients').delete().eq('meal_id', id)
       } else {
-        const { data, error: err } = await supabase
-          .from('meals')
-          .insert(basicData)
+        const { data, error: err } = await supabase.from('meals')
+          .insert({ name: name.trim(), notes: notesValue })
           .select('id')
           .single()
         if (err) throw err
@@ -126,25 +138,12 @@ export default function AddMeal() {
       if (validIngredients.length) {
         await supabase.from('ingredients').insert(validIngredients)
       }
+
+      navigate('/meals')
     } catch (err) {
       setError(err.message)
       setSaving(false)
-      return
     }
-
-    // Phase 2: save photo + recipe_url if the columns exist
-    if (columnsReady) {
-      let finalImageUrl = existingImageUrl || null
-      if (imageFile) {
-        finalImageUrl = await compressToBase64(imageFile)
-      }
-      await supabase.from('meals').update({
-        recipe_url: recipeUrl.trim() || null,
-        image_url: finalImageUrl,
-      }).eq('id', mealId)
-    }
-
-    navigate('/meals')
   }
 
   async function handleDelete() {
@@ -174,21 +173,6 @@ export default function AddMeal() {
           </button>
         </div>
       </div>
-
-      {/* Banner shown until SQL is run */}
-      {!columnsReady && (
-        <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-4 mb-5">
-          <p className="font-extrabold text-amber-800 text-sm mb-1">📋 Foto en skakel nog nie aktief nie</p>
-          <p className="text-xs text-amber-700 font-semibold mb-2">
-            Hardloop hierdie SQL in Supabase om fotos en resep-skakels te aktiveer:
-          </p>
-          <code className="block bg-amber-100 text-amber-900 text-xs p-2 rounded-xl font-mono leading-relaxed">
-            alter table meals add column if not exists recipe_url text;<br />
-            alter table meals add column if not exists image_url text;
-          </code>
-          <p className="text-xs text-amber-600 font-semibold mt-2">Maaltyd en bestanddele word wel gestoor.</p>
-        </div>
-      )}
 
       <form onSubmit={handleSubmit} className="space-y-5">
         {error && (
@@ -222,7 +206,7 @@ export default function AddMeal() {
             placeholder="Kookinstruksies, wenke, porsies…" rows={4} className="input-field resize-none" />
         </div>
 
-        <div className={columnsReady ? '' : 'opacity-40 pointer-events-none'}>
+        <div>
           <label className="block text-sm font-extrabold text-gray-600 mb-2 uppercase tracking-wide">
             Resep Skakel <span className="text-gray-400 font-semibold normal-case">(opsioneel — TikTok, YouTube, ens.)</span>
           </label>
@@ -230,7 +214,7 @@ export default function AddMeal() {
             placeholder="https://www.tiktok.com/..." className="input-field" />
         </div>
 
-        <div className={columnsReady ? '' : 'opacity-40 pointer-events-none'}>
+        <div>
           <label className="block text-sm font-extrabold text-gray-600 mb-2 uppercase tracking-wide">
             Foto <span className="text-gray-400 font-semibold normal-case">(opsioneel)</span>
           </label>
