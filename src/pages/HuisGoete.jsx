@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
 const ROOMS = [
@@ -15,8 +16,6 @@ const ROOMS = [
   { id: 'garage',     label: 'Garage',           emoji: '🚗' },
 ]
 
-// Items are stored in shopping_items with category = `house_${roomId}`
-// Photo and link are encoded into item_name as JSON
 function decodeItem(rawName) {
   try {
     const d = JSON.parse(rawName)
@@ -51,8 +50,7 @@ function compressToBase64(file) {
   })
 }
 
-// Single item card — expandable, editable
-function ItemCard({ row, categoryId, onDeleted, onUpdated }) {
+function ItemCard({ row, onDeleted, onUpdated }) {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const fileInputRef = useRef(null)
@@ -78,9 +76,7 @@ function ItemCard({ row, categoryId, onDeleted, onUpdated }) {
     let finalImage = editImagePreview || null
     if (editImageFile) finalImage = await compressToBase64(editImageFile)
     const newEncoded = encodeItem(editName, editLink, finalImage)
-    await supabase.from('shopping_items')
-      .update({ item_name: newEncoded })
-      .eq('id', row.id)
+    await supabase.from('shopping_items').update({ item_name: newEncoded }).eq('id', row.id)
     onUpdated()
     setEditing(false)
     setOpen(true)
@@ -142,10 +138,9 @@ function ItemCard({ row, categoryId, onDeleted, onUpdated }) {
       <div className="flex items-center gap-3 px-4 py-3.5 cursor-pointer select-none active:bg-gray-50"
         onClick={() => setOpen(o => !o)}>
         <span className="flex-1 font-extrabold">{name}</span>
-        {(link || image) && <span className="text-xs text-gray-400">{image ? '📷' : ''}{link ? '🔗' : ''}</span>}
+        {(link || image) && <span className="text-xs text-gray-400">{image ? '📷 ' : ''}{link ? '🔗' : ''}</span>}
         <span className={`text-gray-400 font-black text-lg transition-transform duration-200 ${open ? 'rotate-90' : ''}`}>›</span>
       </div>
-
       {open && (
         <div className="border-t border-gray-100 px-4 pb-4 pt-3 space-y-3">
           {image && (
@@ -174,9 +169,12 @@ function ItemCard({ row, categoryId, onDeleted, onUpdated }) {
   )
 }
 
-// Items list for one room
-function RoomView({ roomId }) {
+export function RoomPage() {
+  const { roomId } = useParams()
+  const navigate = useNavigate()
+  const room = ROOMS.find(r => r.id === roomId)
   const categoryId = `house_${roomId}`
+
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [newName, setNewName] = useState('')
@@ -231,113 +229,118 @@ function RoomView({ roomId }) {
     setAdding(false)
   }
 
-  if (loading) return <p className="text-center py-6 text-gray-400 font-bold animate-pulse">Laai…</p>
+  if (!room) return <div className="p-6 text-center text-gray-400">Kamer nie gevind nie.</div>
 
   return (
-    <div className="mt-3 space-y-3">
-      {/* Add button / form */}
-      {!showAddForm ? (
-        <button onClick={() => setShowAddForm(true)}
-          className="w-full bg-green-50 border-2 border-dashed border-green-200 rounded-2xl py-4 text-green-600 font-extrabold text-sm active:scale-95 transition-transform">
-          ＋ Voeg item by
+    <div className="max-w-lg mx-auto px-4 py-6">
+      <div className="flex items-center gap-3 mb-6">
+        <button onClick={() => navigate('/huisgoete')}
+          className="bg-gray-100 text-gray-500 font-extrabold text-sm px-3 py-2 rounded-xl">
+          ← Terug
         </button>
-      ) : (
-        <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-4 space-y-3">
-          <div>
-            <label className="text-xs font-extrabold text-gray-500 uppercase tracking-wide">Item naam *</label>
-            <input value={newName} onChange={e => setNewName(e.target.value)}
-              onKeyDown={e => e.key === 'Enter' && addItem()}
-              className="input-field mt-1" placeholder="bv. Gebreekte lig" autoFocus />
-          </div>
-          <div>
-            <label className="text-xs font-extrabold text-gray-500 uppercase tracking-wide">Skakel (opsioneel)</label>
-            <input type="url" value={newLink} onChange={e => setNewLink(e.target.value)}
-              className="input-field mt-1" placeholder="https://..." />
-          </div>
-          <div>
-            <label className="text-xs font-extrabold text-gray-500 uppercase tracking-wide mb-2 block">Foto (opsioneel)</label>
-            {newImagePreview ? (
-              <div className="relative">
-                <img src={newImagePreview} alt="foto" className="w-full max-h-48 object-cover rounded-xl" />
-                <button type="button" onClick={() => { setNewImagePreview(''); setNewImageFile(null) }}
-                  className="absolute top-2 right-2 bg-red-500 text-white w-7 h-7 rounded-full font-black flex items-center justify-center">×</button>
-              </div>
-            ) : (
-              <button type="button" onClick={() => fileInputRef.current?.click()}
-                className="w-full border-2 border-dashed border-gray-300 rounded-xl py-5 flex flex-col items-center gap-1 text-gray-400">
-                <span className="text-3xl">📷</span>
-                <span className="text-xs font-extrabold">Kies foto van foon</span>
-              </button>
-            )}
-            <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImagePick} className="hidden" />
-          </div>
-          <div className="flex gap-2">
-            <button onClick={addItem} disabled={adding || !newName.trim()}
-              className="flex-1 bg-green-500 text-white font-extrabold py-2.5 rounded-xl disabled:opacity-50">
-              {adding ? 'Stoor…' : '＋ Voeg by'}
-            </button>
-            <button onClick={resetForm}
-              className="flex-1 bg-gray-100 text-gray-600 font-extrabold py-2.5 rounded-xl">
-              Kanselleer
-            </button>
-          </div>
-        </div>
-      )}
+        <span className="text-3xl">{room.emoji}</span>
+        <h2 className="text-2xl font-black">{room.label}</h2>
+      </div>
 
-      {/* Items list */}
-      {rows.length === 0 && !showAddForm && (
-        <div className="text-center py-8 text-gray-400">
-          <p className="text-3xl mb-2">📋</p>
-          <p className="font-extrabold text-sm">Nog geen items nie</p>
+      {loading ? (
+        <p className="text-center py-6 text-gray-400 font-bold animate-pulse">Laai…</p>
+      ) : (
+        <div className="space-y-3">
+          {!showAddForm ? (
+            <button onClick={() => setShowAddForm(true)}
+              className="w-full bg-green-50 border-2 border-dashed border-green-200 rounded-2xl py-4 text-green-600 font-extrabold text-sm active:scale-95 transition-transform">
+              ＋ Voeg item by
+            </button>
+          ) : (
+            <div className="bg-white rounded-2xl shadow-md border border-gray-100 p-4 space-y-3">
+              <div>
+                <label className="text-xs font-extrabold text-gray-500 uppercase tracking-wide">Item naam *</label>
+                <input value={newName} onChange={e => setNewName(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && addItem()}
+                  className="input-field mt-1" placeholder="bv. Gebreekte lig" autoFocus />
+              </div>
+              <div>
+                <label className="text-xs font-extrabold text-gray-500 uppercase tracking-wide">Skakel (opsioneel)</label>
+                <input type="url" value={newLink} onChange={e => setNewLink(e.target.value)}
+                  className="input-field mt-1" placeholder="https://..." />
+              </div>
+              <div>
+                <label className="text-xs font-extrabold text-gray-500 uppercase tracking-wide mb-2 block">Foto (opsioneel)</label>
+                {newImagePreview ? (
+                  <div className="relative">
+                    <img src={newImagePreview} alt="foto" className="w-full max-h-48 object-cover rounded-xl" />
+                    <button type="button" onClick={() => { setNewImagePreview(''); setNewImageFile(null) }}
+                      className="absolute top-2 right-2 bg-red-500 text-white w-7 h-7 rounded-full font-black flex items-center justify-center">×</button>
+                  </div>
+                ) : (
+                  <button type="button" onClick={() => fileInputRef.current?.click()}
+                    className="w-full border-2 border-dashed border-gray-300 rounded-xl py-5 flex flex-col items-center gap-1 text-gray-400">
+                    <span className="text-3xl">📷</span>
+                    <span className="text-xs font-extrabold">Kies foto van foon</span>
+                  </button>
+                )}
+                <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImagePick} className="hidden" />
+              </div>
+              <div className="flex gap-2">
+                <button onClick={addItem} disabled={adding || !newName.trim()}
+                  className="flex-1 bg-green-500 text-white font-extrabold py-2.5 rounded-xl disabled:opacity-50">
+                  {adding ? 'Stoor…' : '＋ Voeg by'}
+                </button>
+                <button onClick={resetForm}
+                  className="flex-1 bg-gray-100 text-gray-600 font-extrabold py-2.5 rounded-xl">
+                  Kanselleer
+                </button>
+              </div>
+            </div>
+          )}
+
+          {rows.length === 0 && !showAddForm && (
+            <div className="text-center py-12 text-gray-400">
+              <p className="text-4xl mb-2">📋</p>
+              <p className="font-extrabold text-sm">Nog geen items nie</p>
+            </div>
+          )}
+
+          <ul className="space-y-2">
+            {rows.map(row => (
+              <ItemCard
+                key={row.id}
+                row={row}
+                onDeleted={deletedId => setRows(prev => prev.filter(r => r.id !== deletedId))}
+                onUpdated={() => supabase.from('shopping_items').select('*').eq('category', categoryId)
+                  .order('created_at', { ascending: true })
+                  .then(({ data }) => setRows(data ?? []))}
+              />
+            ))}
+          </ul>
         </div>
       )}
-      <ul className="space-y-2">
-        {rows.map(row => (
-          <ItemCard
-            key={row.id}
-            row={row}
-            categoryId={categoryId}
-            onDeleted={deletedId => setRows(prev => prev.filter(r => r.id !== deletedId))}
-            onUpdated={() => supabase.from('shopping_items').select('*').eq('category', categoryId)
-              .order('created_at', { ascending: true })
-              .then(({ data }) => setRows(data ?? []))}
-          />
-        ))}
-      </ul>
     </div>
   )
 }
 
 export default function HuisGoete() {
-  const [activeRoom, setActiveRoom] = useState(null)
+  const navigate = useNavigate()
 
   return (
     <div className="max-w-lg mx-auto px-4 py-6">
-      <div className="flex items-center gap-2 mb-5">
+      <div className="flex items-center gap-2 mb-6">
         <span className="text-3xl">🏠</span>
         <h2 className="text-2xl font-black">Huisgoete</h2>
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-3 gap-3">
         {ROOMS.map(room => (
           <button
             key={room.id}
-            onClick={() => setActiveRoom(prev => prev === room.id ? null : room.id)}
-            className={`flex flex-col items-center justify-center gap-1 px-2 py-3 rounded-2xl font-extrabold text-[11px] text-center leading-tight transition-all active:scale-95 ${
-              activeRoom === room.id
-                ? 'bg-green-500 text-white shadow-md'
-                : 'bg-gray-100 text-gray-600'
-            }`}
+            onClick={() => navigate(`/huisgoete/${room.id}`)}
+            className="flex flex-col items-center justify-center gap-1.5 px-2 py-4 rounded-2xl bg-gray-100 text-gray-600 font-extrabold text-[11px] text-center leading-tight active:scale-95 active:bg-green-50 active:text-green-700 transition-all"
           >
-            <span className="text-2xl">{room.emoji}</span>
+            <span className="text-3xl">{room.emoji}</span>
             <span>{room.label}</span>
           </button>
         ))}
       </div>
-
-      {activeRoom && (
-        <RoomView key={activeRoom} roomId={activeRoom} />
-      )}
     </div>
   )
 }
