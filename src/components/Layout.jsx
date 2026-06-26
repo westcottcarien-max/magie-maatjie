@@ -5,7 +5,7 @@ const navItems = [
   { to: '/plan',          label: 'Week se Etes',  icon: '📅' },
   { to: '/shopping',      label: 'Inkopies',      icon: '🛒' },
   { to: '/hierdie-week',  label: 'Hierdie Week',  icon: '✅' },
-  { to: '/vorige-weke',   label: 'Vorige Weke',   icon: '📋' },
+  { to: '/huisgoete',     label: 'Huisgoete',     icon: '🏠' },
 ]
 
 export default function Layout() {
