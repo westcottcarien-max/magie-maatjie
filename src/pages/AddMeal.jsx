@@ -5,6 +5,25 @@ import IngredientRow from '../components/IngredientRow'
 
 const emptyIngredient = () => ({ item_name: '' })
 
+// Compress picked image to a small JPEG base64 string — no storage bucket needed
+function compressToBase64(file) {
+  return new Promise(resolve => {
+    const canvas = document.createElement('canvas')
+    const img = new Image()
+    const objUrl = URL.createObjectURL(file)
+    img.onload = () => {
+      URL.revokeObjectURL(objUrl)
+      const MAX = 900
+      const ratio = Math.min(MAX / img.width, MAX / img.height, 1)
+      canvas.width = Math.round(img.width * ratio)
+      canvas.height = Math.round(img.height * ratio)
+      canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height)
+      resolve(canvas.toDataURL('image/jpeg', 0.75))
+    }
+    img.src = objUrl
+  })
+}
+
 export default function AddMeal() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -20,6 +39,14 @@ export default function AddMeal() {
   const [ingredients, setIngredients] = useState([emptyIngredient()])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState(null)
+  const [columnsReady, setColumnsReady] = useState(false)
+
+  // Check if recipe_url / image_url columns exist in the DB
+  useEffect(() => {
+    supabase.from('meals').select('recipe_url').limit(1).then(({ error }) => {
+      setColumnsReady(!error)
+    })
+  }, [])
 
   useEffect(() => {
     if (!isEdit) return
@@ -76,7 +103,7 @@ export default function AddMeal() {
 
     let mealId = id
 
-    // Phase 1: save meal + ingredients — if this fails, stop and show error
+    // Phase 1: save meal name + notes + ingredients — always works
     try {
       const basicData = { name: name.trim(), notes: notes.trim() || null }
       if (isEdit) {
@@ -105,24 +132,17 @@ export default function AddMeal() {
       return
     }
 
-    // Phase 2: try to save photo + recipe_url — silently ignored if columns/bucket missing
-    let finalImageUrl = existingImageUrl || null
-    if (imageFile) {
-      const ext = imageFile.name.split('.').pop() || 'jpg'
-      const path = `${Date.now()}-${Math.random().toString(36).slice(2)}.${ext}`
-      const { error: uploadError } = await supabase.storage
-        .from('meal-images')
-        .upload(path, imageFile, { upsert: true })
-      if (!uploadError) {
-        const { data: urlData } = supabase.storage.from('meal-images').getPublicUrl(path)
-        finalImageUrl = urlData.publicUrl
+    // Phase 2: save photo + recipe_url if the columns exist
+    if (columnsReady) {
+      let finalImageUrl = existingImageUrl || null
+      if (imageFile) {
+        finalImageUrl = await compressToBase64(imageFile)
       }
+      await supabase.from('meals').update({
+        recipe_url: recipeUrl.trim() || null,
+        image_url: finalImageUrl,
+      }).eq('id', mealId)
     }
-    await supabase.from('meals').update({
-      recipe_url: recipeUrl.trim() || null,
-      image_url: finalImageUrl,
-    }).eq('id', mealId)
-    // errors here are ignored — meal is already saved above
 
     navigate('/meals')
   }
@@ -143,24 +163,32 @@ export default function AddMeal() {
         </div>
         <div className="flex gap-2">
           {isEdit && (
-            <button
-              type="button"
-              onClick={handleDelete}
-              disabled={saving}
-              className="bg-red-50 text-red-500 font-extrabold text-sm px-3 py-2 rounded-xl disabled:opacity-40"
-            >
+            <button type="button" onClick={handleDelete} disabled={saving}
+              className="bg-red-50 text-red-500 font-extrabold text-sm px-3 py-2 rounded-xl disabled:opacity-40">
               🗑️ Skrap
             </button>
           )}
-          <button
-            type="button"
-            onClick={() => navigate('/meals')}
-            className="bg-gray-100 text-gray-500 font-extrabold text-sm px-3 py-2 rounded-xl"
-          >
+          <button type="button" onClick={() => navigate('/meals')}
+            className="bg-gray-100 text-gray-500 font-extrabold text-sm px-3 py-2 rounded-xl">
             ← Terug
           </button>
         </div>
       </div>
+
+      {/* Banner shown until SQL is run */}
+      {!columnsReady && (
+        <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-4 mb-5">
+          <p className="font-extrabold text-amber-800 text-sm mb-1">📋 Foto en skakel nog nie aktief nie</p>
+          <p className="text-xs text-amber-700 font-semibold mb-2">
+            Hardloop hierdie SQL in Supabase om fotos en resep-skakels te aktiveer:
+          </p>
+          <code className="block bg-amber-100 text-amber-900 text-xs p-2 rounded-xl font-mono leading-relaxed">
+            alter table meals add column if not exists recipe_url text;<br />
+            alter table meals add column if not exists image_url text;
+          </code>
+          <p className="text-xs text-amber-600 font-semibold mt-2">Maaltyd en bestanddele word wel gestoor.</p>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="space-y-5">
         {error && (
@@ -171,106 +199,62 @@ export default function AddMeal() {
 
         <div>
           <label className="block text-sm font-extrabold text-gray-600 mb-2 uppercase tracking-wide">Maaltydnaam *</label>
-          <input
-            type="text"
-            value={name}
-            onChange={e => setName(e.target.value)}
-            placeholder="bv. Spaghetti Bolognese"
-            className="input-field"
-          />
+          <input type="text" value={name} onChange={e => setName(e.target.value)}
+            placeholder="bv. Spaghetti Bolognese" className="input-field" />
         </div>
 
         <div>
           <label className="block text-sm font-extrabold text-gray-600 mb-3 uppercase tracking-wide">Bestanddele</label>
           <div className="space-y-2">
             {ingredients.map((ing, i) => (
-              <IngredientRow
-                key={i}
-                ingredient={ing}
-                index={i}
-                onChange={updateIngredient}
-                onRemove={removeIngredient}
-              />
+              <IngredientRow key={i} ingredient={ing} index={i} onChange={updateIngredient} onRemove={removeIngredient} />
             ))}
           </div>
-          <button
-            type="button"
-            onClick={addIngredient}
-            className="mt-3 flex items-center gap-1 text-green-600 font-extrabold text-sm bg-green-50 px-4 py-2 rounded-xl hover:bg-green-100 transition-colors"
-          >
+          <button type="button" onClick={addIngredient}
+            className="mt-3 flex items-center gap-1 text-green-600 font-extrabold text-sm bg-green-50 px-4 py-2 rounded-xl hover:bg-green-100 transition-colors">
             ＋ Voeg bestanddeel by
           </button>
         </div>
 
         <div>
           <label className="block text-sm font-extrabold text-gray-600 mb-2 uppercase tracking-wide">Notas</label>
-          <textarea
-            value={notes}
-            onChange={e => setNotes(e.target.value)}
-            placeholder="Kookinstruksies, wenke, porsies…"
-            rows={4}
-            className="input-field resize-none"
-          />
+          <textarea value={notes} onChange={e => setNotes(e.target.value)}
+            placeholder="Kookinstruksies, wenke, porsies…" rows={4} className="input-field resize-none" />
         </div>
 
-        <div>
+        <div className={columnsReady ? '' : 'opacity-40 pointer-events-none'}>
           <label className="block text-sm font-extrabold text-gray-600 mb-2 uppercase tracking-wide">
             Resep Skakel <span className="text-gray-400 font-semibold normal-case">(opsioneel — TikTok, YouTube, ens.)</span>
           </label>
-          <input
-            type="url"
-            value={recipeUrl}
-            onChange={e => setRecipeUrl(e.target.value)}
-            placeholder="https://www.tiktok.com/..."
-            className="input-field"
-          />
+          <input type="url" value={recipeUrl} onChange={e => setRecipeUrl(e.target.value)}
+            placeholder="https://www.tiktok.com/..." className="input-field" />
         </div>
 
-        <div>
+        <div className={columnsReady ? '' : 'opacity-40 pointer-events-none'}>
           <label className="block text-sm font-extrabold text-gray-600 mb-2 uppercase tracking-wide">
             Foto <span className="text-gray-400 font-semibold normal-case">(opsioneel)</span>
           </label>
 
           {imagePreview ? (
             <div className="relative">
-              <img
-                src={imagePreview}
-                alt="voorskou"
-                className="w-full max-h-56 object-cover rounded-2xl"
-              />
-              <button
-                type="button"
-                onClick={removeImage}
-                className="absolute top-2 right-2 bg-red-500 text-white w-8 h-8 rounded-full font-black text-lg flex items-center justify-center shadow-lg"
-              >
+              <img src={imagePreview} alt="voorskou" className="w-full max-h-56 object-cover rounded-2xl" />
+              <button type="button" onClick={removeImage}
+                className="absolute top-2 right-2 bg-red-500 text-white w-8 h-8 rounded-full font-black text-lg flex items-center justify-center shadow-lg">
                 ×
               </button>
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full border-2 border-dashed border-gray-300 rounded-2xl py-8 flex flex-col items-center gap-2 text-gray-400 active:scale-95 transition-transform"
-            >
+            <button type="button" onClick={() => fileInputRef.current?.click()}
+              className="w-full border-2 border-dashed border-gray-300 rounded-2xl py-8 flex flex-col items-center gap-2 text-gray-400 active:scale-95 transition-transform">
               <span className="text-4xl">📷</span>
               <span className="font-extrabold text-sm">Kies foto van foon</span>
             </button>
           )}
 
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            onChange={handleImagePick}
-            className="hidden"
-          />
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImagePick} className="hidden" />
         </div>
 
-        <button
-          type="submit"
-          disabled={saving}
-          className="btn-primary disabled:opacity-50"
-        >
+        <button type="submit" disabled={saving} className="btn-primary disabled:opacity-50">
           {saving ? 'Besig om te stoor…' : isEdit ? '💾 Stoor Wysigings' : '🎉 Stoor Maaltyd'}
         </button>
       </form>
