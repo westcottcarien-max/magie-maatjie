@@ -2,6 +2,8 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 
+const EXPIRE_MS = 24 * 60 * 60 * 1000
+
 const ROOMS = [
   { id: 'kombuis',    label: 'Kombuis',          emoji: '🍳' },
   { id: 'sitkamer',   label: 'Sitkamer',         emoji: '🛋️' },
@@ -11,7 +13,7 @@ const ROOMS = [
   { id: 'raikie',     label: "Raaikie se Kamer", emoji: '🌸' },
   { id: 'lala',       label: 'Lalaloops Kamer',  emoji: '🦄' },
   { id: 'girlsbad',   label: 'Girls Badkamer',   emoji: '💅' },
-  { id: 'mammakamer', label: 'Mamma Kamer',      emoji: '🌙' },
+  { id: 'mammakamer', label: 'Ons Kamer',        emoji: '❤️' },
   { id: 'onsbad',     label: 'Ons Badkamer',     emoji: '🚿' },
   { id: 'garage',     label: 'Garage',           emoji: '🚗' },
 ]
@@ -50,12 +52,25 @@ function compressToBase64(file) {
   })
 }
 
-function ItemCard({ row, onDeleted, onUpdated }) {
+// Sort: unchecked A-Z (by decoded name), then checked at bottom
+function sortRows(rows) {
+  const unchecked = rows
+    .filter(r => !r.checked_at)
+    .sort((a, b) => decodeItem(a.item_name).name.localeCompare(decodeItem(b.item_name).name, 'af'))
+  const checked = rows
+    .filter(r => r.checked_at)
+    .sort((a, b) => Number(a.checked_at) - Number(b.checked_at))
+  return [...unchecked, ...checked]
+}
+
+// ─── Single item card ──────────────────────────────────────────────────────────
+function ItemCard({ row, onRowChange, onDeleted }) {
   const [open, setOpen] = useState(false)
   const [editing, setEditing] = useState(false)
   const fileInputRef = useRef(null)
 
   const { name, link, image } = decodeItem(row.item_name)
+  const isChecked = !!row.checked_at
 
   const [editName, setEditName] = useState(name)
   const [editLink, setEditLink] = useState(link ?? '')
@@ -63,24 +78,11 @@ function ItemCard({ row, onDeleted, onUpdated }) {
   const [editImageFile, setEditImageFile] = useState(null)
   const [saving, setSaving] = useState(false)
 
-  function handleImagePick(e) {
-    const file = e.target.files[0]
-    if (!file) return
-    setEditImageFile(file)
-    setEditImagePreview(URL.createObjectURL(file))
-  }
-
-  async function saveEdit() {
-    if (!editName.trim()) return
-    setSaving(true)
-    let finalImage = editImagePreview || null
-    if (editImageFile) finalImage = await compressToBase64(editImageFile)
-    const newEncoded = encodeItem(editName, editLink, finalImage)
-    await supabase.from('shopping_items').update({ item_name: newEncoded }).eq('id', row.id)
-    onUpdated()
-    setEditing(false)
-    setOpen(true)
-    setSaving(false)
+  async function toggle() {
+    const { data: updated } = await supabase.from('shopping_items')
+      .update({ checked_at: row.checked_at ? null : Date.now() })
+      .eq('id', row.id).select().single()
+    if (updated) onRowChange(updated)
   }
 
   async function deleteItem() {
@@ -89,13 +91,43 @@ function ItemCard({ row, onDeleted, onUpdated }) {
     onDeleted(row.id)
   }
 
+  async function saveEdit() {
+    if (!editName.trim()) return
+    setSaving(true)
+    let finalImage = editImagePreview || null
+    if (editImageFile) finalImage = await compressToBase64(editImageFile)
+    const newEncoded = encodeItem(editName, editLink, finalImage)
+    const { data: updated } = await supabase.from('shopping_items')
+      .update({ item_name: newEncoded })
+      .eq('id', row.id).select().single()
+    if (updated) onRowChange(updated)
+    setEditing(false)
+    setOpen(true)
+    setSaving(false)
+  }
+
+  // Checked state: simplified dimmed row
+  if (isChecked) {
+    return (
+      <li className="flex items-center gap-3 px-4 py-3 bg-white rounded-2xl border border-gray-100 opacity-50">
+        <button onClick={toggle}
+          className="w-6 h-6 rounded-lg border-2 border-green-500 bg-green-500 flex-shrink-0 flex items-center justify-center text-white text-xs font-black">
+          ✓
+        </button>
+        <span className="flex-1 line-through text-gray-400 font-bold">{name}</span>
+        <button onClick={deleteItem} className="text-gray-300 font-black text-xl leading-none">×</button>
+      </li>
+    )
+  }
+
+  // Edit mode
   if (editing) {
     return (
       <li className="bg-white rounded-2xl shadow-md border border-gray-100 p-4 space-y-3">
         <div>
           <label className="text-xs font-extrabold text-gray-500 uppercase tracking-wide">Item naam</label>
           <input value={editName} onChange={e => setEditName(e.target.value)}
-            className="input-field mt-1" placeholder="bv. Gebreekte lig" />
+            className="input-field mt-1" autoFocus />
         </div>
         <div>
           <label className="text-xs font-extrabold text-gray-500 uppercase tracking-wide">Skakel (opsioneel)</label>
@@ -117,7 +149,9 @@ function ItemCard({ row, onDeleted, onUpdated }) {
               <span className="text-xs font-extrabold">Kies foto</span>
             </button>
           )}
-          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImagePick} className="hidden" />
+          <input ref={fileInputRef} type="file" accept="image/*"
+            onChange={e => { const f = e.target.files[0]; if (f) { setEditImageFile(f); setEditImagePreview(URL.createObjectURL(f)) } }}
+            className="hidden" />
         </div>
         <div className="flex gap-2">
           <button onClick={saveEdit} disabled={saving || !editName.trim()}
@@ -133,14 +167,19 @@ function ItemCard({ row, onDeleted, onUpdated }) {
     )
   }
 
+  // Normal expandable card
   return (
     <li className="bg-white rounded-2xl shadow-md border border-gray-100 overflow-hidden">
-      <div className="flex items-center gap-3 px-4 py-3.5 cursor-pointer select-none active:bg-gray-50"
-        onClick={() => setOpen(o => !o)}>
-        <span className="flex-1 font-extrabold">{name}</span>
-        {(link || image) && <span className="text-xs text-gray-400">{image ? '📷 ' : ''}{link ? '🔗' : ''}</span>}
-        <span className={`text-gray-400 font-black text-lg transition-transform duration-200 ${open ? 'rotate-90' : ''}`}>›</span>
+      <div className="flex items-center gap-3 px-4 py-3.5">
+        <button onClick={toggle}
+          className="w-6 h-6 rounded-lg border-2 border-gray-300 flex-shrink-0 active:border-green-400" />
+        <span onClick={() => setOpen(o => !o)} className="flex-1 font-extrabold cursor-pointer select-none">{name}</span>
+        {(link || image) && <span className="text-xs text-gray-400">{image ? '📷' : ''}{link ? '🔗' : ''}</span>}
+        <span onClick={() => setOpen(o => !o)}
+          className={`text-gray-400 font-black text-lg cursor-pointer transition-transform duration-200 ${open ? 'rotate-90' : ''}`}>›</span>
+        <button onClick={deleteItem} className="text-gray-300 font-black text-xl leading-none pl-1">×</button>
       </div>
+
       {open && (
         <div className="border-t border-gray-100 px-4 pb-4 pt-3 space-y-3">
           {image && (
@@ -158,10 +197,6 @@ function ItemCard({ row, onDeleted, onUpdated }) {
               className="text-xs bg-green-50 text-green-700 font-extrabold px-3 py-1.5 rounded-xl">
               ✏️ Wysig
             </button>
-            <button onClick={deleteItem}
-              className="text-xs bg-red-50 text-red-500 font-extrabold px-3 py-1.5 rounded-xl">
-              🗑️ Skrap
-            </button>
           </div>
         </div>
       )}
@@ -169,6 +204,7 @@ function ItemCard({ row, onDeleted, onUpdated }) {
   )
 }
 
+// ─── Room item list (/huisgoete/:roomId) ───────────────────────────────────────
 export function RoomPage() {
   const { roomId } = useParams()
   const navigate = useNavigate()
@@ -186,9 +222,17 @@ export function RoomPage() {
   const fileInputRef = useRef(null)
 
   useEffect(() => {
-    supabase.from('shopping_items').select('*').eq('category', categoryId)
-      .order('created_at', { ascending: true })
-      .then(({ data }) => { setRows(data ?? []); setLoading(false) })
+    async function load() {
+      // Clean up expired checked items
+      const cutoff = Date.now() - EXPIRE_MS
+      await supabase.from('shopping_items').delete()
+        .eq('category', categoryId).not('checked_at', 'is', null).lt('checked_at', cutoff)
+
+      const { data } = await supabase.from('shopping_items').select('*').eq('category', categoryId)
+      setRows(data ?? [])
+      setLoading(false)
+    }
+    load()
 
     const channel = supabase.channel(`huisgoete-${roomId}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'shopping_items', filter: `category=eq.${categoryId}` },
@@ -201,13 +245,6 @@ export function RoomPage() {
 
     return () => supabase.removeChannel(channel)
   }, [roomId, categoryId])
-
-  function handleImagePick(e) {
-    const file = e.target.files[0]
-    if (!file) return
-    setNewImageFile(file)
-    setNewImagePreview(URL.createObjectURL(file))
-  }
 
   function resetForm() {
     setNewName(''); setNewLink(''); setNewImagePreview(''); setNewImageFile(null)
@@ -230,6 +267,8 @@ export function RoomPage() {
   }
 
   if (!room) return <div className="p-6 text-center text-gray-400">Kamer nie gevind nie.</div>
+
+  const sorted = sortRows(rows)
 
   return (
     <div className="max-w-lg mx-auto px-4 py-6">
@@ -279,7 +318,9 @@ export function RoomPage() {
                     <span className="text-xs font-extrabold">Kies foto van foon</span>
                   </button>
                 )}
-                <input ref={fileInputRef} type="file" accept="image/*" onChange={handleImagePick} className="hidden" />
+                <input ref={fileInputRef} type="file" accept="image/*"
+                  onChange={e => { const f = e.target.files[0]; if (f) { setNewImageFile(f); setNewImagePreview(URL.createObjectURL(f)) } }}
+                  className="hidden" />
               </div>
               <div className="flex gap-2">
                 <button onClick={addItem} disabled={adding || !newName.trim()}
@@ -294,7 +335,7 @@ export function RoomPage() {
             </div>
           )}
 
-          {rows.length === 0 && !showAddForm && (
+          {sorted.length === 0 && !showAddForm && (
             <div className="text-center py-12 text-gray-400">
               <p className="text-4xl mb-2">📋</p>
               <p className="font-extrabold text-sm">Nog geen items nie</p>
@@ -302,14 +343,12 @@ export function RoomPage() {
           )}
 
           <ul className="space-y-2">
-            {rows.map(row => (
+            {sorted.map(row => (
               <ItemCard
                 key={row.id}
                 row={row}
-                onDeleted={deletedId => setRows(prev => prev.filter(r => r.id !== deletedId))}
-                onUpdated={() => supabase.from('shopping_items').select('*').eq('category', categoryId)
-                  .order('created_at', { ascending: true })
-                  .then(({ data }) => setRows(data ?? []))}
+                onRowChange={updated => setRows(prev => prev.map(r => r.id === updated.id ? updated : r))}
+                onDeleted={id => setRows(prev => prev.filter(r => r.id !== id))}
               />
             ))}
           </ul>
@@ -319,8 +358,32 @@ export function RoomPage() {
   )
 }
 
+// ─── Main Huisgoete overview ───────────────────────────────────────────────────
 export default function HuisGoete() {
   const navigate = useNavigate()
+  const [counts, setCounts] = useState({})
+
+  useEffect(() => {
+    loadCounts()
+
+    const channel = supabase.channel('huisgoete-counts')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shopping_items' },
+        () => loadCounts())
+      .subscribe()
+
+    return () => supabase.removeChannel(channel)
+  }, [])
+
+  async function loadCounts() {
+    const { data } = await supabase.from('shopping_items')
+      .select('category')
+      .like('category', 'house_%')
+      .is('checked_at', null)
+    if (!data) return
+    const map = {}
+    data.forEach(({ category }) => { map[category] = (map[category] ?? 0) + 1 })
+    setCounts(map)
+  }
 
   return (
     <div className="max-w-lg mx-auto px-4 py-6">
@@ -330,16 +393,24 @@ export default function HuisGoete() {
       </div>
 
       <div className="grid grid-cols-3 gap-3">
-        {ROOMS.map(room => (
-          <button
-            key={room.id}
-            onClick={() => navigate(`/huisgoete/${room.id}`)}
-            className="flex flex-col items-center justify-center gap-1.5 px-2 py-4 rounded-2xl bg-gray-100 text-gray-600 font-extrabold text-[11px] text-center leading-tight active:scale-95 active:bg-green-50 active:text-green-700 transition-all"
-          >
-            <span className="text-3xl">{room.emoji}</span>
-            <span>{room.label}</span>
-          </button>
-        ))}
+        {ROOMS.map(room => {
+          const count = counts[`house_${room.id}`] ?? 0
+          return (
+            <button
+              key={room.id}
+              onClick={() => navigate(`/huisgoete/${room.id}`)}
+              className="relative flex flex-col items-center justify-center gap-1.5 px-2 py-4 rounded-2xl bg-gray-100 text-gray-600 font-extrabold text-[11px] text-center leading-tight active:scale-95 active:bg-green-50 active:text-green-700 transition-all"
+            >
+              <span className="text-3xl">{room.emoji}</span>
+              <span>{room.label}</span>
+              {count > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 bg-green-500 text-white text-[10px] font-black min-w-[18px] h-[18px] rounded-full flex items-center justify-center px-1 leading-none">
+                  {count}
+                </span>
+              )}
+            </button>
+          )
+        })}
       </div>
     </div>
   )
